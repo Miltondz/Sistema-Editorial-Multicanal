@@ -135,7 +135,7 @@ export const generateVariant = action({
     const yearHint = item.sourceDate ? String(new Date(item.sourceDate).getFullYear()) : ''
 
     if (args.channel === 'tumblr') {
-      userMessage = `Write a Tumblr post for SuperheroesInColor.com. Match the exact format used on the blog.
+      userMessage = `Write a Tumblr post for SuperheroesInColor.com. Audience: passionate comics fans who know the medium.
 
 CONTENT DETAILS:
 Title: ${item.title}
@@ -144,39 +144,46 @@ Year: ${yearHint || 'unknown'}
 ${franchise}
 ${publisher}
 Description: ${description}
-Creators: ${creatorsText}
+Creators listed: ${creatorsText}
 Representation: ${reprTags}
 Themes: ${themeTags}
 Buy link: ${link || 'none'}
 
-═══ OUTPUT FORMAT ═══
-
-headline (plain text, no HTML):
+═══ HEADLINE (plain text, no HTML) ═══
 Format by type:
 - Comic/manga: "Series Title Vol.N #Issue (Year) // Publisher" — e.g., "Hardware: Season One #4 (2022) // DC Comics"
 - Book/novel: "Title (Year)" — e.g., "Shook! A Black Horror Anthology (2024)"
 - Film/TV: "Title (Year)" — e.g., "The Eternaut (2025)"
-- Character/actor: "Character / Show or Comic (Year)" — e.g., "White Tiger / Daredevil: Born Again (2025)"
+- Character/actor: "Character / Show or Comic (Year)"
 - Cosplay: "Character Name #Cosplay by Cosplayer Name"
 
-bodyText (HTML — NO <h2>, NO footer links — those are added automatically):
-Structure:
-1. <p><i>One-sentence hook or logline in italics</i></p>
-2. 2–3 <p> paragraphs: story/content description, creator backgrounds, why it matters to the community
-3. If buy link exists: <p>Get it <a href="${link || '#'}">here</a></p> (for books) or <p>Get the comic <a href="${link || '#'}">here</a></p> (for comics)
-4. If creators have notable awards/credits, mention them in a <p> paragraph
-HTML rules:
-- Use <b> for creator names on first mention
-- Use <i> for titles of referenced works
-- Use <a href="url">text</a> for buy links only
-- NO <h2>, NO <h3>, NO <img>, NO footer links, NO hashtags in body
-- Tone: enthusiastic, curatorial — like a knowledgeable friend recommending something they love
-- Do NOT use "diverse", "diversity", or "minority" — name the actual identities
-- 3–5 paragraphs total, punchy not academic
+═══ BODY TEXT (HTML — STRICT RULES) ═══
+Structure: MAX 3 <p> blocks total. No exceptions.
+  1. <p><i>One-sentence logline or hook in italics — specific, no vague superlatives</i></p>
+  2. <p>1–2 sentences: story/premise OR specific representation angle — concrete, names identities directly</p>
+  3. <p>Creator paragraph: name the writer and artist by <b>Name</b>, their nationality or background if known, 1–2 notable other works or awards. If buy link: end this paragraph or add a buy line: <p>Get it <a href="${link || '#'}">here</a></p></p>
+  If no buy link, paragraph 3 is still the creator paragraph.
 
-ctaText (comma-separated tags — NO # prefix):
-Include: character names, creator last names, publisher/studio, identity terms, title keywords, franchise, any notable awards
-8–15 tags, most specific first. Example: "Hardware, Brandon Thomas, Denys Cowan, black superheroes, milestone media, dc comics, dakotaverse"
+CREATOR RESEARCH — use your training knowledge:
+  - If "Creators listed" above contains names, expand on those specific people: their nationality, background, notable other works, awards (Eisner, Harvey, Ringo, Hugo, GLYPH, etc.) if you know them.
+  - If creators are unknown from the input, attempt to identify the writer/artist for this specific title from your knowledge — name them only if you are CONFIDENT. If uncertain, omit rather than guess.
+  - DO NOT invent credits, awards, or biographical facts you are not confident about.
+
+HTML rules:
+- <b> for creator names on first mention
+- <i> for referenced work titles
+- <a href="url"> for buy links only
+- NO <h2>, NO <img>, NO footer links, NO hashtags in body
+- Tone: curatorial, warm, knowledgeable — NOT activist-lecture, NOT preachy
+
+BANNED PHRASES (do not use, in any form):
+must-read, a must, instant classic, essential reading, you need to read, perfect for fans of, don't miss, highly recommended, stunning, groundbreaking, amazing, incredible (without specific evidence), powerful story (without explaining why), diverse, diversity, minority
+
+DO NOT use more than 3 <p> blocks. Trim ruthlessly — 1–2 tight paragraphs with real info beats 3 with filler.
+
+═══ CTATEXT (Tumblr tags) ═══
+Comma-separated tag names (NO # prefix). Include: character names, creator surnames, publisher, identity terms, title keywords, franchise, awards if applicable. 8–15 tags, most specific first.
+Example: "Hardware, Brandon Thomas, Denys Cowan, black superheroes, milestone media, dc comics, dakotaverse"
 
 Return ONLY this JSON (no markdown, no extra text):
 {
@@ -185,7 +192,8 @@ Return ONLY this JSON (no markdown, no extra text):
   "ctaText": "tag1, tag2, tag3"
 }`
     } else {
-      userMessage = `Write a post for X (Twitter) for SuperheroesInColor promoting the following content.
+      // X / Twitter — mirrors Tumblr headline format but compressed
+      userMessage = `Write a post for X (Twitter) for SuperheroesInColor. Audience: comics fans on a scroll.
 
 CONTENT DETAILS:
 Title: ${item.title}
@@ -195,21 +203,26 @@ ${franchise}
 ${publisher}
 Creators: ${creatorsText}
 Representation: ${reprTags}
-Buy link: ${link || 'none'}
 
 RULES:
-- bodyText max 200 characters — plain text only, no HTML, no hashtags in body
-- ctaText = the buy/info link (plain URL) if available, otherwise 1-sentence CTA under 50 chars
-- bodyText + ctaText combined must be under 275 characters
-- Lead with the most specific representation angle: "Black queer protagonist", "written by a Latinx woman" — never "diverse"
-- Do NOT use "diverse", "diversity", "minority", or activist framing
-- Tone: direct, punchy, celebratory — a trusted recommendation in a scroll
+headline — same title format as Tumblr:
+  Comic: "Series Title #Issue (Year)"  e.g. "Hardware: Season One #4 (2022)"
+  Book: "Title (Year)"
+  Film/TV: "Title (Year)"
+
+bodyText — 1 sentence ONLY, max 150 chars, plain text:
+  - Most specific representation angle first: "Black queer protagonist", "written by a Puerto Rican author"
+  - Do NOT use: diverse, diversity, minority, must-read, amazing, incredible, stunning
+  - No hashtags, no links, no HTML
+
+ctaText — ALWAYS return the exact string: "linktr.ee/HeroesInColor"
+  (Do not use the buy link. Always use linktr.ee/HeroesInColor.)
 
 Return ONLY this JSON (no markdown, no extra text):
 {
-  "headline": "First line hook, max 60 characters, plain text",
-  "bodyText": "Post body, max 200 characters, plain text, no hashtags",
-  "ctaText": "${link ? link : 'Short CTA, no link'}"
+  "headline": "Title (Year) — plain text",
+  "bodyText": "1 sentence, max 150 chars, plain text",
+  "ctaText": "linktr.ee/HeroesInColor"
 }`
     }
 
@@ -228,8 +241,27 @@ Return ONLY this JSON (no markdown, no extra text):
     }
 
     const headline = String(parsed.headline ?? '')
-    const bodyText = String(parsed.bodyText ?? '')
-    const ctaText  = String(parsed.ctaText  ?? '')
+    let bodyText   = String(parsed.bodyText ?? '')
+    let ctaText    = String(parsed.ctaText  ?? '')
+
+    if (args.channel === 'tumblr') {
+      // Enforce max 3 <p> blocks — model may ignore the prompt cap
+      const pBlocks = bodyText.match(/<p[\s>][\s\S]*?<\/p>/gi) ?? []
+      if (pBlocks.length > 3) {
+        bodyText = pBlocks.slice(0, 3).join('\n')
+      }
+    }
+
+    if (args.channel === 'x') {
+      // Hard-set regardless of what model returned
+      ctaText = 'linktr.ee/HeroesInColor'
+      // Strip any stray HTML from X bodyText
+      bodyText = bodyText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      // Enforce 150 char cap on bodyText
+      if (bodyText.length > 150) {
+        bodyText = bodyText.slice(0, 147) + '...'
+      }
+    }
 
     await ctx.runMutation(internal.contentVariants.applyGeneration, {
       contentItemId: args.contentItemId,

@@ -30,6 +30,16 @@ const STATUS_COLORS: Record<VariantStatus, string> = {
 const INPUT_CLASS =
   'w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
 
+/** Strip script/style/iframe/event-handler attrs before dangerouslySetInnerHTML */
+function sanitizeHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/\s+on\w+\s*=\s*[^\s>]+/gi, '')
+}
+
 interface ChannelCardProps {
   contentItemId: Id<'contentItems'>
   channel: Channel
@@ -55,6 +65,8 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
   const [generateError, setGenerateError] = useState<string | null>(null)
   const [publishing, setPublishing]       = useState(false)
   const [publishResult, setPublishResult] = useState<{ url?: string; error?: string } | null>(null)
+  // 'preview' = rendered HTML (Tumblr only); 'code' = raw text
+  const [bodyPreviewMode, setBodyPreviewMode] = useState<'preview' | 'code'>('preview')
 
   const channelLabel = channel === 'tumblr' ? 'Tumblr' : 'X / Twitter'
   const status       = activeVariant?.status as VariantStatus | undefined
@@ -154,24 +166,69 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
 
       {/* Preview (not editing) */}
       {activeVariant && !editing && (
-        <div className="space-y-1.5 text-sm text-gray-700 bg-gray-50 rounded p-3">
+        <div className="space-y-2 text-sm text-gray-700">
+          {/* Headline */}
           {activeVariant.headline && (
-            <p>
-              <span className="font-medium text-gray-500 text-xs">Titular: </span>
-              {activeVariant.headline}
-            </p>
+            <div className="bg-gray-50 rounded px-3 py-2">
+              <span className="font-semibold text-gray-500 text-xs block mb-0.5">TITULAR</span>
+              <p className="text-sm font-medium text-gray-900">{activeVariant.headline}</p>
+            </div>
           )}
+
+          {/* Body — HTML preview toggle for Tumblr */}
           {activeVariant.bodyText && (
-            <p className="whitespace-pre-wrap line-clamp-4">
-              <span className="font-medium text-gray-500 text-xs">Cuerpo: </span>
-              {activeVariant.bodyText}
-            </p>
+            <div className="bg-gray-50 rounded px-3 py-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-semibold text-gray-500 text-xs">CUERPO</span>
+                {channel === 'tumblr' && (
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setBodyPreviewMode('preview')}
+                      className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                        bodyPreviewMode === 'preview'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      Vista previa
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBodyPreviewMode('code')}
+                      className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                        bodyPreviewMode === 'code'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      Código
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {channel === 'tumblr' && bodyPreviewMode === 'preview' ? (
+                <div
+                  className="prose prose-sm max-w-none text-gray-800 [&_h2]:text-base [&_h2]:font-bold [&_p]:my-1 [&_a]:text-indigo-600 [&_a]:underline"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(activeVariant.bodyText) }}
+                />
+              ) : (
+                <p className="whitespace-pre-wrap text-xs text-gray-700 font-mono leading-relaxed">
+                  {activeVariant.bodyText}
+                </p>
+              )}
+            </div>
           )}
+
+          {/* CTA / Tags */}
           {activeVariant.ctaText && (
-            <p>
-              <span className="font-medium text-gray-500 text-xs">CTA: </span>
-              {activeVariant.ctaText}
-            </p>
+            <div className="bg-gray-50 rounded px-3 py-2">
+              <span className="font-semibold text-gray-500 text-xs block mb-0.5">
+                {channel === 'tumblr' ? 'TAGS' : 'CTA / LINK'}
+              </span>
+              <p className="text-xs text-gray-700">{activeVariant.ctaText}</p>
+            </div>
           )}
         </div>
       )}
@@ -193,19 +250,29 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
-              Cuerpo {channel === 'x' ? '(máx 220 caracteres)' : '(200–400 palabras)'}
+              Cuerpo {channel === 'x' ? '(máx 150 caracteres)' : '(HTML — ver vista previa abajo)'}
             </label>
             <textarea
               value={form.bodyText}
               onChange={e => setForm(f => ({ ...f, bodyText: e.target.value }))}
-              maxLength={channel === 'x' ? 220 : undefined}
+              maxLength={channel === 'x' ? 150 : undefined}
               rows={channel === 'x' ? 3 : 6}
-              className={INPUT_CLASS}
+              className={`${INPUT_CLASS} font-mono text-xs`}
             />
             {channel === 'x' && (
               <p className="text-xs text-gray-400 mt-0.5 text-right">
-                {form.bodyText.length}/220
+                {form.bodyText.length}/150
               </p>
+            )}
+            {/* Live HTML preview for Tumblr edit mode */}
+            {channel === 'tumblr' && form.bodyText && (
+              <div className="mt-2">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Vista previa en tiempo real</p>
+                <div
+                  className="border border-gray-200 rounded px-3 py-2 bg-white prose prose-sm max-w-none text-gray-800 [&_h2]:text-base [&_h2]:font-bold [&_p]:my-1 [&_a]:text-indigo-600 [&_a]:underline"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(form.bodyText) }}
+                />
+              </div>
             )}
           </div>
           <div>

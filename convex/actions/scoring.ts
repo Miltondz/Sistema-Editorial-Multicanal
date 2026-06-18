@@ -64,10 +64,15 @@ export const generateCalendar = action({
   }> => {
     const overwrite = args.overwriteUnlocked ?? true
 
+    // Clamp: never generate slots in the past (server-side defense-in-depth)
+    const serverToday = new Date()
+    const todayISO = `${serverToday.getUTCFullYear()}-${String(serverToday.getUTCMonth()+1).padStart(2,'0')}-${String(serverToday.getUTCDate()).padStart(2,'0')}`
+    const effectiveStart = args.startDate < todayISO ? todayISO : args.startDate
+
     // Single internal query fetches all data needed
     const data = await ctx.runQuery(
       internal.scheduleSlots.getDataForGenerationInternal,
-      { startDate: args.startDate, endDate: args.endDate, channel: args.channel }
+      { startDate: effectiveStart, endDate: args.endDate, channel: args.channel }
     )
 
     const { rules, slotsInRange, topScores, allItems, approvedVariants, recentPubs } = data as {
@@ -146,7 +151,7 @@ export const generateCalendar = action({
     }
     eligible.sort((a, b) => b.reuseScore - a.reuseScore)
 
-    // Clear non-locked slots in range
+    // Clear non-locked slots in range (full month range — removes stale past slots)
     if (overwrite) {
       await ctx.runMutation(internal.scheduleSlots.clearUnlockedInRangeInternal, {
         startDate: args.startDate,
@@ -155,9 +160,9 @@ export const generateCalendar = action({
       })
     }
 
-    // Calendar generation with quota tracking
+    // Calendar generation with quota tracking (clamped range — no past dates)
     const batchId = `cal-${Date.now()}-${Math.floor(Math.random() * 1000000)}`
-    const dates = getDatesInRange(args.startDate, args.endDate)
+    const dates = getDatesInRange(effectiveStart, args.endDate)
 
     const quotaCount: Record<string, number> = { comic: 0, libro: 0, cosplay: 0, articulo: 0, otros: 0 }
     const quotaTarget: Record<string, number> = {

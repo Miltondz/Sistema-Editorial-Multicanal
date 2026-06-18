@@ -534,6 +534,40 @@ export const bulkUpdate = mutation({
   },
 })
 
+// Pending-approvals count for planner banner
+// Counts active variants in 'generated' or 'edited' status (need approval before publish)
+// plus items in 'draft' or 'in_review' (need editorial review)
+export const countByStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    // Variants awaiting approval (generated or edited, not yet approved)
+    const [genTumblr, genX, editTumblr, editX] = await Promise.all([
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'tumblr').eq('status', 'generated')).take(500),
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'x').eq('status', 'generated')).take(500),
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'tumblr').eq('status', 'edited')).take(500),
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'x').eq('status', 'edited')).take(500),
+    ])
+    // Distinct items with unapproved active variants
+    const pendingItems = new Set<string>()
+    for (const v of [...genTumblr, ...genX, ...editTumblr, ...editX]) {
+      if (v.isActive) pendingItems.add(v.contentItemId as string)
+    }
+
+    // Items needing editorial review (imported or manual draft)
+    const [inReview, draft] = await Promise.all([
+      ctx.db.query('contentItems').withIndex('by_status', q => q.eq('status', 'in_review')).take(500),
+      ctx.db.query('contentItems').withIndex('by_status', q => q.eq('status', 'draft')).take(500),
+    ])
+
+    return {
+      inReview:        inReview.length,
+      draft:           draft.length,
+      variantsPending: pendingItems.size,
+      total:           pendingItems.size + inReview.length + draft.length,
+    }
+  },
+})
+
 // Light stats for dashboard — bounded queries
 export const getDashboardStats = query({
   args: {},

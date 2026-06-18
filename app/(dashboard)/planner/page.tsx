@@ -38,6 +38,18 @@ const STATUS_COLORS: Record<string, string> = {
   failed:     'bg-red-50 text-red-700 border border-red-200',
 }
 
+// Status left-border colors for SlotPill (type-colored bg + status border-l)
+const STATUS_BORDER: Record<string, string> = {
+  empty:      'border-l-gray-300',
+  planned:    'border-l-blue-400',
+  locked:     'border-l-yellow-500',
+  ready:      'border-l-green-500',
+  publishing: 'border-l-purple-600',
+  published:  'border-l-indigo-600',
+  skipped:    'border-l-gray-400',
+  failed:     'border-l-red-600',
+}
+
 const STATUS_LABELS: Record<string, string> = {
   empty:      'Vacío',
   planned:    'Planeado',
@@ -147,6 +159,8 @@ export default function PlannerPage() {
   const rawSlots   = useQuery(api.scheduleSlots.listByDateRangeWithItems as any, { startDate, endDate, channel })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const xWriteCount = useQuery(api.publicationLog.getXWriteCountThisMonth as any, {})
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pendingCount = useQuery(api.contentItems.countByStatus as any, {})
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const setLocked    = useMutation(api.scheduleSlots.setLocked    as any)
@@ -192,7 +206,9 @@ export default function PlannerPage() {
 
   async function handleGenerate() {
     setGenerating(true); setGenError(null); setGenResult(null)
-    try { setGenResult(await generateCal({ startDate, endDate, channel, overwriteUnlocked: true })) }
+    // Clamp: never generate slots in the past
+    const effectiveStart = startDate < today ? today : startDate
+    try { setGenResult(await generateCal({ startDate: effectiveStart, endDate, channel, overwriteUnlocked: true })) }
     catch (err) { setGenError(err instanceof Error ? err.message : 'Error') }
     finally { setGenerating(false) }
   }
@@ -283,6 +299,41 @@ export default function PlannerPage() {
           </button>
         </div>
       </div>
+
+      {/* ── Pending approvals banner — always visible ── */}
+      {pendingCount !== undefined && (
+        pendingCount.total > 0 ? (
+          <div className="mb-4 flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-300 rounded-lg text-sm text-amber-800">
+            <div className="flex items-center gap-2">
+              <span className="text-base">⚠️</span>
+              <span>
+                <span className="font-semibold">{pendingCount.total}</span> pendiente{pendingCount.total !== 1 ? 's' : ''} de aprobación
+                <span className="ml-1.5 text-amber-600 text-xs font-normal">
+                  ({[
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    (pendingCount as any).variantsPending > 0 && `${(pendingCount as any).variantsPending} variante${(pendingCount as any).variantsPending !== 1 ? 's' : ''}`,
+                    pendingCount.inReview > 0 && `${pendingCount.inReview} en revisión`,
+                    pendingCount.draft > 0 && `${pendingCount.draft} borrador${pendingCount.draft !== 1 ? 'es' : ''}`,
+                  ].filter(Boolean).join(' · ')})
+                </span>
+              </span>
+            </div>
+            <Link href="/catalog" className="ml-4 px-3 py-1 text-xs font-semibold bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors shrink-0">
+              Ir al catálogo →
+            </Link>
+          </div>
+        ) : (
+          <div className="mb-4 flex items-center justify-between px-4 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              <span>Sin publicaciones pendientes de aprobación</span>
+            </div>
+            <Link href="/catalog" className="ml-4 text-xs text-green-600 hover:text-green-800 underline underline-offset-2 shrink-0">
+              Ver catálogo →
+            </Link>
+          </div>
+        )
+      )}
 
       {/* ── Feedback ── */}
       {genResult && (
@@ -382,10 +433,27 @@ export default function PlannerPage() {
       )}
 
       {/* ── Legend ── */}
-      <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
-        {Object.entries(STATUS_LABELS).filter(([k]) => k !== 'empty').map(([k, label]) => (
-          <span key={k} className={`px-2 py-0.5 rounded ${STATUS_COLORS[k]}`}>{label}</span>
-        ))}
+      <div className="mt-4 space-y-2">
+        <div>
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Tipo de contenido</p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(TYPE_COLORS).map(([type, cls]) => (
+              <span key={type} className={`px-2 py-0.5 rounded text-xs border-l-4 border-l-gray-400 ${cls}`}>
+                {type}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">Estado (borde izquierdo)</p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(STATUS_LABELS).filter(([k]) => k !== 'empty').map(([k, label]) => (
+              <span key={k} className={`px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-600 border-l-4 ${STATUS_BORDER[k]}`}>
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* ── Modals ── */}
@@ -538,10 +606,10 @@ function WeekBand({
                   <button
                     type="button"
                     onClick={() => onAddClick(date, dayPart)}
-                    className="self-center text-[10px] text-gray-300 hover:text-indigo-500 leading-none py-0.5 px-1 rounded hover:bg-indigo-50 transition-colors"
-                    title="Agregar slot"
+                    className="w-full text-[10px] text-gray-400 border border-dashed border-gray-300 rounded py-0.5 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors leading-none"
+                    title="Agregar publicación"
                   >
-                    +
+                    + Agregar
                   </button>
                 )}
               </div>
@@ -565,7 +633,8 @@ function SlotPill({
   onClick: () => void
 }) {
   const draggable = !slot.locked && !['published', 'publishing'].includes(slot.status)
-  const colorClass = STATUS_COLORS[slot.status] ?? STATUS_COLORS.planned
+  const typeColor   = TYPE_COLORS[slot.item?.contentType] ?? 'bg-gray-100 text-gray-600'
+  const borderColor = STATUS_BORDER[slot.status] ?? 'border-l-gray-400'
 
   return (
     <div
@@ -574,19 +643,17 @@ function SlotPill({
       onDragEnd={onDragEnd}
       onClick={onClick}
       title={slot.item?.title ?? 'Sin contenido'}
-      className={`rounded px-1.5 py-1 text-[10px] select-none transition-all cursor-pointer ${colorClass} ${
+      className={`rounded px-1.5 py-1 text-[10px] select-none transition-all cursor-pointer border-l-4 ${typeColor} ${borderColor} ${
         draggable ? 'hover:brightness-95 active:opacity-70' : 'opacity-80'
       }`}
     >
       <div className="flex items-center gap-1 mb-0.5">
         {slot.locked && <span title="Bloqueado" className="text-[9px]">🔒</span>}
-        <span className={`px-1 rounded text-[9px] font-medium ${
-          TYPE_COLORS[slot.item?.contentType] ?? 'bg-gray-100 text-gray-600'
-        }`}>
+        <span className="text-[9px] font-semibold opacity-80">
           {slot.item?.contentType ?? '—'}
         </span>
         {slot.contentMode === 'recycled' && (
-          <span className="text-[9px] bg-amber-100 text-amber-600 px-0.5 rounded">♻</span>
+          <span className="text-[9px] bg-amber-100 text-amber-600 px-0.5 rounded ml-auto">♻</span>
         )}
       </div>
       <p className="font-medium leading-tight line-clamp-2 text-[10px]">

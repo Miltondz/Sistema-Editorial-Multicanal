@@ -83,22 +83,27 @@ function buildTumblrPayload(
 
 function buildXPayload(
   variant: { headline?: string; bodyText?: string; ctaText?: string },
-  item: { buyLink?: string },
+  _item: { buyLink?: string },
   mediaAssets: Array<{ publicUrl: string }>
 ) {
-  const ctaWithLink = variant.ctaText ?? item.buyLink ?? ''
-  const urlCharCount = ctaWithLink.startsWith('http') ? 23 : ctaWithLink.length
-  const availableChars = 280 - urlCharCount - 2
+  const headline = stripHtml(variant.headline ?? '').trim()
+  const cta      = 'linktr.ee/HeroesInColor'  // always fixed — enforced in ai.ts too
+  let   body     = stripHtml(variant.bodyText ?? '').trim()
 
-  // Strip HTML in case bodyText was generated for Tumblr channel
-  let text = stripHtml(variant.bodyText ?? '')
-  if (text.length > availableChars) {
-    text = text.slice(0, availableChars - 3) + '...'
+  // Assemble: headline + body + cta, each separated by blank line
+  // Total budget: 280 chars. Overhead = headline + 2×"\n\n" (4) + cta = fixed
+  const overhead = headline.length + 4 + cta.length
+  const maxBody  = Math.max(0, 280 - overhead - 4) // extra 4 for safety
+
+  if (body.length > maxBody) {
+    body = body.slice(0, maxBody - 3) + '...'
   }
 
-  const fullText = [text, ctaWithLink].filter(Boolean).join('\n\n')
+  const parts = [headline, body, cta].filter(Boolean)
+  const text  = parts.join('\n\n')
+
   return {
-    text: fullText,
+    text,
     imageUrls: mediaAssets.map(a => a.publicUrl).slice(0, 4),
   }
 }
