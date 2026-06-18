@@ -36,9 +36,17 @@ INPUT: "${args.input}"
 
 ${typeHint}
 
+TITLE FORMAT RULES:
+- Comics/manga: "Title Vol.N #Issue (Year)" — e.g., "Hardware: Season One #4 (2022)" or "Miles Morales: Spider-Man #1 (2019)"
+- If only series title known (no issue): "Title (Year)" — e.g., "Black Panther (2016)"
+- Books/novels: "Title (Year)" — include series name in parentheses if part of a series: "2043... (A Merman I Should Turn to Be) (Black Stars)"
+- Film/TV: "Title (Year)" — e.g., "The Eternaut (2025)"
+- Cosplay: "Character Name #Cosplay by Cosplayer Name"
+- Use the EXACT title as published. Check against League of Comic Geeks (leagueofcomicgeeks.com), Marvel Database (marvel.fandom.com), DC Database (dc.fandom.com), or publisher sites for accuracy.
+
 Return ONLY a valid JSON object with this exact structure (no markdown, no extra text):
 {
-  "title": "exact title of the work or person",
+  "title": "formatted title following the rules above",
   "contentType": "one of: comic, libro, autor, cosplay, articulo, poster, pelicula, personaje, coleccion",
   "summary": "2-3 sentence editorial summary. Be specific about who is represented (race, ethnicity, gender, nationality of characters/creators when known). Do not use the word 'diverse' — name the actual identity.",
   "franchise": "parent franchise or universe if applicable, otherwise empty string",
@@ -49,13 +57,13 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no extra
   ],
   "representationTags": ["specific identity tags — e.g. Black, Latina, Indigenous, queer, trans, Asian-American, Afro-Latino. Max 8. Only include what is known or clearly evident."],
   "themeTags": ["thematic tags — e.g. identity, legacy, family, resistance, afrofuturism, mythology, coming-of-age. Max 6."],
-  "buyLink": "official purchase or info URL if known, otherwise empty string",
+  "buyLink": "official purchase or info URL if known (Amazon, comixology, publisher store), otherwise empty string",
   "evergreenClass": "high if the content remains relevant indefinitely (classic works, iconic characters), medium if seasonally or cyclically relevant, low if tied to a specific news moment",
   "editorialPriority": 3,
   "confidence": 0.0
 }
 
-confidence: float 0.0–1.0 reflecting how certain you are about the details. Use 0.9+ only if you are very familiar with the title. Use 0.5 if you are inferring from partial info.`
+confidence: float 0.0–1.0. Use 0.9+ only if you are certain about the details (familiar title, verified creators). Use 0.5 if inferring from partial info. Use 0.3 if mostly guessing.`
 
     let rawText: string
     try {
@@ -124,35 +132,57 @@ export const generateVariant = action({
 
     let userMessage: string
 
+    const yearHint = item.sourceDate ? String(new Date(item.sourceDate).getFullYear()) : ''
+
     if (args.channel === 'tumblr') {
-      userMessage = `Write a Tumblr post for SuperheroesInColor promoting the following content. The audience is passionate comics fans who care deeply about representation.
+      userMessage = `Write a Tumblr post for SuperheroesInColor.com. Match the exact format used on the blog.
 
 CONTENT DETAILS:
 Title: ${item.title}
 Type: ${item.contentType}
+Year: ${yearHint || 'unknown'}
 ${franchise}
 ${publisher}
 Description: ${description}
 Creators: ${creatorsText}
 Representation: ${reprTags}
 Themes: ${themeTags}
-Link: ${link}
+Buy link: ${link || 'none'}
 
-WRITING GUIDELINES:
-- Tone: enthusiastic, curatorial, warm — like a knowledgeable friend recommending something they love
-- Lead with WHY this matters: what specific identities are centered, what perspective the creators bring
-- Name the creators' backgrounds when known (e.g., "written by Afro-Colombian writer…") — specificity honors their work
-- Do NOT use the word "diverse" or "diversity" — be specific about the actual identities
-- Do NOT use "minority" — say "underrepresented", "marginalized", or name the identity directly
-- Do NOT be preachy or frame it as activism — celebrate the art and the storytelling
-- If characters have notable representation, describe them specifically
-- Keep it celebratory, not corrective
+═══ OUTPUT FORMAT ═══
+
+headline (plain text, no HTML):
+Format by type:
+- Comic/manga: "Series Title Vol.N #Issue (Year) // Publisher" — e.g., "Hardware: Season One #4 (2022) // DC Comics"
+- Book/novel: "Title (Year)" — e.g., "Shook! A Black Horror Anthology (2024)"
+- Film/TV: "Title (Year)" — e.g., "The Eternaut (2025)"
+- Character/actor: "Character / Show or Comic (Year)" — e.g., "White Tiger / Daredevil: Born Again (2025)"
+- Cosplay: "Character Name #Cosplay by Cosplayer Name"
+
+bodyText (HTML — NO <h2>, NO footer links — those are added automatically):
+Structure:
+1. <p><i>One-sentence hook or logline in italics</i></p>
+2. 2–3 <p> paragraphs: story/content description, creator backgrounds, why it matters to the community
+3. If buy link exists: <p>Get it <a href="${link || '#'}">here</a></p> (for books) or <p>Get the comic <a href="${link || '#'}">here</a></p> (for comics)
+4. If creators have notable awards/credits, mention them in a <p> paragraph
+HTML rules:
+- Use <b> for creator names on first mention
+- Use <i> for titles of referenced works
+- Use <a href="url">text</a> for buy links only
+- NO <h2>, NO <h3>, NO <img>, NO footer links, NO hashtags in body
+- Tone: enthusiastic, curatorial — like a knowledgeable friend recommending something they love
+- Do NOT use "diverse", "diversity", or "minority" — name the actual identities
+- 3–5 paragraphs total, punchy not academic
+
+ctaText (comma-separated tags — NO # prefix):
+Include: character names, creator last names, publisher/studio, identity terms, title keywords, franchise, any notable awards
+8–15 tags, most specific first. Example: "Hardware, Brandon Thomas, Denys Cowan, black superheroes, milestone media, dc comics, dakotaverse"
 
 Return ONLY this JSON (no markdown, no extra text):
 {
-  "headline": "Attention-grabbing headline, max 100 characters, no clickbait",
-  "bodyText": "Editorial post body, 200–350 words. 3–4 paragraphs. First paragraph hooks with the core representation angle. Second/third paragraphs describe the story, art, or subject. Final paragraph is personal recommendation or why now.",
-  "ctaText": "Short call-to-action, 1–2 sentences${link ? '. Include the link: ' + link : ''}"
+  "headline": "...",
+  "bodyText": "<p><i>...</i></p><p>...</p>",
+  "ctaText": "tag1, tag2, tag3"
 }`
     } else {
       userMessage = `Write a post for X (Twitter) for SuperheroesInColor promoting the following content.
@@ -160,30 +190,32 @@ Return ONLY this JSON (no markdown, no extra text):
 CONTENT DETAILS:
 Title: ${item.title}
 Type: ${item.contentType}
+Year: ${yearHint || 'unknown'}
 ${franchise}
+${publisher}
 Creators: ${creatorsText}
 Representation: ${reprTags}
-Link: ${link}
+Buy link: ${link || 'none'}
 
-WRITING GUIDELINES:
-- Tone: direct, punchy, curatorial — like a trusted recommendation in a feed
-- Lead with the most compelling representation angle in the first line
-- Be specific about identities: name the actual representation (e.g., "Black queer protagonist", "written by a Latinx woman"), not "diverse"
-- Do NOT use "diverse", "diversity", "minority", or preachy framing
-- No hashtag spam — max 2–3 relevant hashtags if they genuinely add value
-- The post must fit X's character limits (bodyText + ctaText combined must be under 275 characters to leave room for the link)
+RULES:
+- bodyText max 200 characters — plain text only, no HTML, no hashtags in body
+- ctaText = the buy/info link (plain URL) if available, otherwise 1-sentence CTA under 50 chars
+- bodyText + ctaText combined must be under 275 characters
+- Lead with the most specific representation angle: "Black queer protagonist", "written by a Latinx woman" — never "diverse"
+- Do NOT use "diverse", "diversity", "minority", or activist framing
+- Tone: direct, punchy, celebratory — a trusted recommendation in a scroll
 
 Return ONLY this JSON (no markdown, no extra text):
 {
-  "headline": "First line / hook, max 60 characters",
-  "bodyText": "Post body, max 200 characters. Punchy, specific, celebratory.",
-  "ctaText": "${link ? 'Short CTA with the link: ' + link : 'Short CTA, no link available'}"
+  "headline": "First line hook, max 60 characters, plain text",
+  "bodyText": "Post body, max 200 characters, plain text, no hashtags",
+  "ctaText": "${link ? link : 'Short CTA, no link'}"
 }`
     }
 
     let rawText: string
     try {
-      rawText = await complete(SYSTEM_PROMPT_BASE, userMessage, 1200)
+      rawText = await complete(SYSTEM_PROMPT_BASE, userMessage, args.channel === 'tumblr' ? 1800 : 800)
     } catch (err) {
       throw new Error(`Error calling OpenRouter: ${err instanceof Error ? err.message : String(err)}`)
     }
