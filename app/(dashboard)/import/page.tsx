@@ -261,24 +261,21 @@ export default function ImportPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1.5">Hasta</label>
-                    <input
-                      type="date"
+                    <DatePicker
                       value={beforeDate}
-                      onChange={e => setBeforeDate(e.target.value)}
+                      onChange={setBeforeDate}
                       max={todayISO()}
                       disabled={isRunning || tumblrLoading}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
                     />
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1.5">Desde <span className="text-slate-600">(opcional)</span></label>
-                    <input
-                      type="date"
+                    <DatePicker
                       value={afterDate}
-                      onChange={e => setAfterDate(e.target.value)}
+                      onChange={setAfterDate}
                       max={beforeDate || todayISO()}
                       disabled={isRunning || tumblrLoading}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                      placeholder="Sin límite"
                     />
                   </div>
                 </div>
@@ -676,6 +673,43 @@ function TabGroup({ value, onChange, options }: {
           {opt.label}
         </button>
       ))}
+    </div>
+  )
+}
+
+// Custom date picker: native input hidden, shows formatted dd MMM yyyy
+function DatePicker({ value, onChange, max, disabled, placeholder }: {
+  value: string
+  onChange: (v: string) => void
+  max?: string
+  disabled?: boolean
+  placeholder?: string
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const display = value
+    ? new Date(value + 'T12:00:00Z').toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+    : ''
+
+  return (
+    <div
+      className={`relative w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 flex items-center justify-between cursor-pointer
+        ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:border-slate-500'}`}
+      onClick={() => !disabled && inputRef.current?.showPicker?.()}
+    >
+      <span className={`text-sm ${display ? 'text-white' : 'text-slate-500'}`}>
+        {display || placeholder || 'Seleccionar…'}
+      </span>
+      <span className="text-slate-500 text-xs ml-2">📅</span>
+      <input
+        ref={inputRef}
+        type="date"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        max={max}
+        disabled={disabled}
+        className="absolute inset-0 opacity-0 w-full h-full cursor-pointer disabled:cursor-not-allowed"
+        style={{ colorScheme: 'dark' }}
+      />
     </div>
   )
 }
