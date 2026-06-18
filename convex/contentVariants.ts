@@ -128,6 +128,19 @@ export const approve = mutation({
       approvedAt: Date.now(),
     })
 
+    // Auto-approve the parent content item if it's still in a pre-approved state.
+    // The calendar generation requires item.status === 'approved' to include it in the pool.
+    const item = await ctx.db.get(variant.contentItemId)
+    if (item && ['draft', 'researching', 'in_review'].includes(item.status)) {
+      await ctx.db.patch(item._id, { status: 'approved', needsReview: false })
+      await ctx.runMutation(internal.auditEvents.log, {
+        entityType: 'contentItem',
+        entityId:   item._id,
+        eventType:  'item.approved',
+        payloadJson: { trigger: 'variant.approved', channel: variant.channel },
+      })
+    }
+
     await ctx.runMutation(internal.auditEvents.log, {
       entityType: 'contentVariant',
       entityId: args.id,
