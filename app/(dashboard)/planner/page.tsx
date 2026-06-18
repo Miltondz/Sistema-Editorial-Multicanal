@@ -3,6 +3,7 @@ import { useQuery, useAction, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import Link from 'next/link'
 import { useState, useRef } from 'react'
+import CalendarGenerateModal from '@/components/planner/CalendarGenerateModal'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -179,10 +180,11 @@ export default function PlannerPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const publishDirect   = useAction(api.actions.publisher.publishDirect as any)
 
-  const [generating,  setGenerating]  = useState(false)
-  const [genResult,   setGenResult]   = useState<{ slotsCreated: number; slotsSkipped: number } | null>(null)
-  const [genError,    setGenError]    = useState<string | null>(null)
-  const [recomputing, setRecomputing] = useState(false)
+  const [generating,    setGenerating]    = useState(false)
+  const [genResult,     setGenResult]     = useState<{ slotsCreated: number; slotsSkipped: number } | null>(null)
+  const [genError,      setGenError]      = useState<string | null>(null)
+  const [recomputing,   setRecomputing]   = useState(false)
+  const [showGenModal,  setShowGenModal]  = useState(false)
 
   // Build slotMap: `${date}:${dayPart}` → slot[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -204,13 +206,19 @@ export default function PlannerPage() {
     if (month === 11) { setYear(y => y + 1); setMonth(0) } else { setMonth(m => m + 1) }
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(selectedItemIds: string[]) {
     setGenerating(true); setGenError(null); setGenResult(null)
-    // Clamp: never generate slots in the past
     const effectiveStart = startDate < today ? today : startDate
-    try { setGenResult(await generateCal({ startDate: effectiveStart, endDate, channel, overwriteUnlocked: true })) }
-    catch (err) { setGenError(err instanceof Error ? err.message : 'Error') }
-    finally { setGenerating(false) }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await generateCal({ startDate: effectiveStart, endDate, channel, overwriteUnlocked: true, selectedItemIds: selectedItemIds as any })
+      setGenResult(result)
+      setShowGenModal(false)
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Error')
+    } finally {
+      setGenerating(false)
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -293,7 +301,7 @@ export default function PlannerPage() {
             className="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50">
             {recomputing ? 'Calculando…' : 'Actualizar scores'}
           </button>
-          <button type="button" onClick={handleGenerate} disabled={generating}
+          <button type="button" onClick={() => setShowGenModal(true)} disabled={generating}
             className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50">
             {generating ? 'Generando…' : 'Generar calendario'}
           </button>
@@ -485,6 +493,17 @@ export default function PlannerPage() {
             } catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
           }}
           actionMsg={actionMsg}
+        />
+      )}
+
+      {showGenModal && (
+        <CalendarGenerateModal
+          channel={channel}
+          startDate={startDate}
+          endDate={endDate}
+          generating={generating}
+          onClose={() => setShowGenModal(false)}
+          onGenerate={handleGenerate}
         />
       )}
     </div>

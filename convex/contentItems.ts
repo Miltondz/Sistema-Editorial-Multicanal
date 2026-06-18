@@ -158,6 +158,58 @@ export const findByHashInternal = internalQuery({
   },
 })
 
+export const listApprovedForCalendar = query({
+  args: {
+    contentType: v.optional(contentTypeV),
+    channel:     v.optional(v.union(v.literal('tumblr'), v.literal('x'))),
+    search:      v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<Array<{
+    itemId: string
+    title: string
+    contentType: string
+    coverImageUrl?: string
+    channels: Array<'tumblr' | 'x'>
+  }>> => {
+    let items
+    if (args.search && args.search.trim().length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      items = await ctx.db.query('contentItems').withSearchIndex('search_title', (q: any) =>
+        q.search('title', args.search!).eq('status', 'approved')
+      ).take(200)
+    } else {
+      items = await ctx.db.query('contentItems')
+        .withIndex('by_status', q => q.eq('status', 'approved'))
+        .take(500)
+    }
+
+    const result: Array<{ itemId: string; title: string; contentType: string; coverImageUrl?: string; channels: Array<'tumblr' | 'x'> }> = []
+
+    for (const item of items) {
+      if (args.contentType && item.contentType !== args.contentType) continue
+      const variants = await ctx.db.query('contentVariants')
+        .withIndex('by_item', q => q.eq('contentItemId', item._id))
+        .take(10)
+
+      const channels = new Set<'tumblr' | 'x'>()
+      for (const v of variants) {
+        if (v.isActive && v.status === 'approved') channels.add(v.channel)
+      }
+      if (channels.size === 0) continue
+      if (args.channel && !channels.has(args.channel)) continue
+
+      result.push({
+        itemId:       item._id as string,
+        title:        item.title,
+        contentType:  item.contentType,
+        coverImageUrl: item.coverImageUrl,
+        channels:     Array.from(channels),
+      })
+    }
+    return result
+  },
+})
+
 export const listNeedsReview = query({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {

@@ -56,6 +56,7 @@ export const generateCalendar = action({
     endDate:          v.string(),
     channel:          channelV,
     overwriteUnlocked: v.optional(v.boolean()),
+    selectedItemIds:  v.optional(v.array(v.id('contentItems'))),
   },
   handler: async (ctx, args): Promise<{
     slotsCreated: number
@@ -130,9 +131,14 @@ export const generateCalendar = action({
       quotaGroup: string
     }
 
+    const selectedSet = args.selectedItemIds && args.selectedItemIds.length > 0
+      ? new Set(args.selectedItemIds.map(id => id as string))
+      : null
+
     const eligible: Candidate[] = []
     for (const item of allItems) {
       const itemId = item._id as string
+      if (selectedSet && !selectedSet.has(itemId)) continue
       const variant = variantMap.get(itemId)
       if (!variant) continue
 
