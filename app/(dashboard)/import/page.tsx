@@ -1,37 +1,41 @@
 'use client'
-import { useQuery, useAction, useMutation } from 'convex/react'
+import { useQuery, useAction, useMutation, usePaginatedQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import Link from 'next/link'
 import { useRef, useState } from 'react'
 
-const STATUS_LABEL: Record<string, string> = {
-  pending:   'Pendiente',
-  running:   'En progreso',
-  completed: 'Completado',
-  partial:   'Parcial',
-  failed:    'Fallido',
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  pending:   'bg-gray-100 text-gray-600',
-  running:   'bg-blue-100 text-blue-700',
-  completed: 'bg-green-100 text-green-700',
-  partial:   'bg-yellow-100 text-yellow-700',
-  failed:    'bg-red-100 text-red-700',
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  tumblr:   'Tumblr',
-  x_export: 'X / Twitter',
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(ms: number) {
-  return new Date(ms).toLocaleDateString('es-ES', { dateStyle: 'medium' })
+  return new Date(ms).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
 }
-
+function fmtDateTime(ms: number) {
+  return new Date(ms).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
+}
 function todayISO() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
+
+const JOB_STATUS_CONFIG: Record<string, { label: string; dot: string; pill: string }> = {
+  pending:   { label: 'Pendiente',    dot: 'bg-gray-400',              pill: 'bg-gray-100 text-gray-600' },
+  running:   { label: 'En progreso',  dot: 'bg-blue-500 animate-pulse', pill: 'bg-blue-100 text-blue-700' },
+  completed: { label: 'Completado',   dot: 'bg-emerald-500',            pill: 'bg-emerald-100 text-emerald-700' },
+  partial:   { label: 'Parcial',      dot: 'bg-amber-500',              pill: 'bg-amber-100 text-amber-700' },
+  failed:    { label: 'Fallido',      dot: 'bg-red-500',               pill: 'bg-red-100 text-red-700' },
+}
+
+const ITEM_STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
+  draft:       { label: 'Borrador',     cls: 'bg-gray-100 text-gray-500' },
+  in_review:   { label: 'En revisión',  cls: 'bg-amber-100 text-amber-700' },
+  approved:    { label: 'Aprobado',     cls: 'bg-emerald-100 text-emerald-700' },
+  published:   { label: 'Publicado',    cls: 'bg-indigo-100 text-indigo-700' },
+  researching: { label: 'Investigando', cls: 'bg-blue-100 text-blue-700' },
+  archived:    { label: 'Archivado',    cls: 'bg-gray-100 text-gray-400' },
+  blocked:     { label: 'Bloqueado',    cls: 'bg-red-100 text-red-700' },
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ImportPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,10 +52,8 @@ export default function ImportPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const generateUploadUrl = useMutation(api.importJobs.generateUploadUrl as any)
 
-  // Tumblr date range
   const [beforeDate, setBeforeDate] = useState(todayISO())
   const [afterDate,  setAfterDate]  = useState('')
-
   const [tumblrLoading, setTumblrLoading] = useState(false)
   const [tumblrError,   setTumblrError]   = useState<string | null>(null)
   const [xLoading,      setXLoading]      = useState(false)
@@ -59,21 +61,26 @@ export default function ImportPage() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const isRunning  = (active as any)?.status === 'running'
+  const isRunning      = (active as any)?.status === 'running'
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const lastConfig = (lastTumblr as any)?.configJson
-  const lastCursor: number | undefined = lastConfig?.cursorTs
-  const lastAfterTs: number | undefined = lastConfig?.afterTs
-  const hasWatermark = lastCursor !== undefined && lastCursor < Date.now() - 60_000
+  const lastConfig     = (lastTumblr as any)?.configJson
+  const lastCursorTs: number | undefined = lastConfig?.cursorTs
+  const lastAfterTs:  number | undefined = lastConfig?.afterTs
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lastJobStatus: string | undefined = (lastTumblr as any)?.status
+  const hasWatermark  = lastCursorTs !== undefined && lastCursorTs < Date.now() - 60_000
+  const canContinue   = hasWatermark && !isRunning && lastJobStatus !== 'completed'
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalImported = jobs ? (jobs as any[]).reduce((s: number, j: any) => s + (j.itemsImported ?? 0), 0) : 0
 
   async function handleTumblrImport(continueFromLast = false) {
     if (isRunning) return
-    setTumblrLoading(true)
-    setTumblrError(null)
+    setTumblrLoading(true); setTumblrError(null)
     try {
       await startTumblrImport({
-        beforeDate: continueFromLast ? undefined : beforeDate || undefined,
-        afterDate:  continueFromLast ? undefined : afterDate  || undefined,
+        beforeDate: continueFromLast ? undefined : (beforeDate || undefined),
+        afterDate:  continueFromLast ? undefined : (afterDate  || undefined),
         continueFromLast,
       })
     } catch (err) {
@@ -83,18 +90,13 @@ export default function ImportPage() {
     }
   }
 
-  async function handleXFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleXFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file || isRunning) return
-    setXLoading(true)
-    setXError(null)
+    setXLoading(true); setXError(null)
     try {
       const uploadUrl = await generateUploadUrl({})
-      const res = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/javascript' },
-        body: file,
-      })
+      const res = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': 'application/javascript' }, body: file })
       const { storageId } = await res.json()
       await processXExport({ storageId })
     } catch (err) {
@@ -106,267 +108,528 @@ export default function ImportPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Importador histórico</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Importa el historial de Tumblr por franjas de fecha. Cada batch descarga 20 posts y guarda
-          una marca de agua — puedes continuar donde quedaste en cualquier momento.
-          La deduplicación es automática.
-        </p>
-      </div>
+    <div className="min-h-screen bg-slate-950">
 
-      {/* Active job banner */}
-      {isRunning && <ActiveJobBanner job={active as any} />}
-
-      {/* Watermark info */}
-      {hasWatermark && !isRunning && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold text-indigo-800">Marca de agua guardada</p>
-            <p className="text-xs text-indigo-600 mt-0.5">
-              Última importación alcanzó posts de <strong>{fmtDate(lastCursor!)}</strong>
-              {lastAfterTs && <> (límite inferior: {fmtDate(lastAfterTs)})</>}
-              . Puedes continuar desde aquí.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleTumblrImport(true)}
-            disabled={isRunning || tumblrLoading}
-            className="shrink-0 px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {tumblrLoading ? 'Iniciando…' : 'Continuar importación →'}
-          </button>
-        </div>
-      )}
-
-      {/* Import sections */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Tumblr */}
-        <div className={`border rounded-lg p-5 space-y-4 ${isRunning && !tumblrLoading ? 'border-gray-100 bg-gray-50' : 'border-gray-200 bg-white'}`}>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">📷</span>
-            <h2 className="font-semibold text-gray-900">Tumblr</h2>
-          </div>
-          <p className="text-sm text-gray-500">
-            Pagina el blog vía OAuth usando marca de tiempo como cursor. Descarga 20 posts por batch,
-            respeta el rate limit (~250 req/hora). Corre en segundo plano — puedes cerrar el navegador.
-          </p>
-
-          {/* Date range */}
-          <div className="space-y-2">
+      {/* ── Hero header ── */}
+      <div className="border-b border-slate-800 bg-slate-950">
+        <div className="max-w-5xl mx-auto px-6 py-8">
+          <div className="flex items-end justify-between gap-6">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Hasta (fecha más reciente a importar)
-              </label>
-              <input
-                type="date"
-                value={beforeDate}
-                onChange={e => setBeforeDate(e.target.value)}
-                max={todayISO()}
-                disabled={isRunning || tumblrLoading}
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Desde (fecha más antigua — opcional)
-              </label>
-              <input
-                type="date"
-                value={afterDate}
-                onChange={e => setAfterDate(e.target.value)}
-                max={beforeDate || todayISO()}
-                disabled={isRunning || tumblrLoading}
-                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50 disabled:text-gray-400"
-              />
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                Vacío = importar todo el historial disponible
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-lg shadow-lg">
+                  ⬇
+                </div>
+                <h1 className="text-2xl font-black text-white tracking-tight">Importador histórico</h1>
+              </div>
+              <p className="text-slate-400 text-sm">
+                Descarga el historial de Tumblr y X al catálogo editorial · deduplicación automática
               </p>
             </div>
+            {totalImported > 0 && (
+              <div className="text-right shrink-0">
+                <p className="text-3xl font-black text-white tabular-nums">{totalImported.toLocaleString()}</p>
+                <p className="text-xs text-slate-400 mt-0.5">posts importados</p>
+              </div>
+            )}
           </div>
-
-          <button
-            type="button"
-            onClick={() => handleTumblrImport(false)}
-            disabled={isRunning || tumblrLoading}
-            className="w-full px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
-            {tumblrLoading ? 'Iniciando…' : isRunning ? 'Job en progreso…' : 'Iniciar importación Tumblr'}
-          </button>
-
-          {tumblrError && (
-            <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-              {tumblrError}
-            </div>
-          )}
-        </div>
-
-        {/* X export */}
-        <div className={`border rounded-lg p-5 space-y-4 ${isRunning && !xLoading ? 'border-gray-100 bg-gray-50' : 'border-gray-200 bg-white'}`}>
-          <div className="flex items-center gap-2">
-            <span className="text-xl">✕</span>
-            <h2 className="font-semibold text-gray-900">X / Twitter</h2>
-          </div>
-          <p className="text-sm text-gray-500">
-            Sube el archivo <code className="text-xs bg-gray-100 px-1 rounded">tweet.js</code> del
-            export oficial de X. Se filtran respuestas y retweets. Procesa en batches de 50.
-          </p>
-          <label
-            className={`block w-full px-4 py-2 text-center text-sm rounded-md border-2 border-dashed cursor-pointer transition-colors ${
-              isRunning || xLoading
-                ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-                : 'border-gray-300 text-gray-700 hover:border-indigo-400 hover:text-indigo-600'
-            }`}
-          >
-            {xLoading ? 'Procesando…' : isRunning ? 'Job en progreso…' : '+ Subir tweet.js'}
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".js,.json"
-              className="hidden"
-              onChange={handleXFileChange}
-              disabled={isRunning || xLoading}
-            />
-          </label>
-          <p className="text-xs text-gray-400 text-center">
-            Archivo: <code>data/tweet.js</code> del export de X
-          </p>
-          {xError && (
-            <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
-              {xError}
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Job history */}
-      {jobs && (jobs as any[]).length > 0 && (
-        <div>
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">
-            Historial de importaciones
-          </h2>
-          <div className="border border-gray-200 rounded-lg overflow-hidden divide-y divide-gray-100">
-            {(jobs as any[]).map((job: any) => (
-              <JobRow key={job._id} job={job} />
-            ))}
+      <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+
+        {/* ── Active job ── */}
+        {isRunning && <ActiveJobCard job={active as any} />}
+
+        {/* ── Import sources ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+          {/* Tumblr card */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+            {/* Card header */}
+            <div className="px-6 py-5 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-xl">
+                  📷
+                </div>
+                <div>
+                  <h2 className="font-bold text-white">Tumblr</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">OAuth · 20 posts/batch · corre en 2do plano</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 space-y-5">
+              {/* Watermark / continue */}
+              {hasWatermark && (
+                <div className={`rounded-xl p-4 space-y-3 ${canContinue ? 'bg-indigo-500/10 border border-indigo-500/30' : 'bg-slate-800/60 border border-slate-700'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className={`text-[11px] font-bold uppercase tracking-widest mb-1 ${canContinue ? 'text-indigo-400' : 'text-slate-500'}`}>
+                        Marca de agua
+                      </p>
+                      <p className="text-sm font-semibold text-white">
+                        Hasta {fmtDate(lastCursorTs!)}
+                      </p>
+                      {lastAfterTs && (
+                        <p className="text-xs text-slate-400">límite inferior: {fmtDate(lastAfterTs)}</p>
+                      )}
+                      <p className="text-[11px] mt-1 text-slate-400">
+                        {lastJobStatus === 'completed' ? '✓ Rango completado' : '⚡ Interrumpido · puede reanudarse'}
+                      </p>
+                    </div>
+                    {canContinue && (
+                      <button
+                        type="button"
+                        onClick={() => handleTumblrImport(true)}
+                        disabled={tumblrLoading}
+                        className="shrink-0 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {tumblrLoading ? <><Spinner /> Iniciando</> : 'Continuar →'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Date range form */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Nuevo rango</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1.5">Hasta</label>
+                    <input
+                      type="date"
+                      value={beforeDate}
+                      onChange={e => setBeforeDate(e.target.value)}
+                      max={todayISO()}
+                      disabled={isRunning || tumblrLoading}
+                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1.5">Desde <span className="text-slate-600">(opcional)</span></label>
+                    <input
+                      type="date"
+                      value={afterDate}
+                      onChange={e => setAfterDate(e.target.value)}
+                      max={beforeDate || todayISO()}
+                      disabled={isRunning || tumblrLoading}
+                      className="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+
+                {/* Range summary */}
+                {(beforeDate || afterDate) && (
+                  <p className="text-[11px] text-slate-500 bg-slate-800/50 rounded-lg px-3 py-2 leading-relaxed">
+                    Posts{afterDate ? <> desde <strong className="text-slate-300">{fmtDate(new Date(afterDate + 'T00:00:00Z').getTime())}</strong></> : ' del inicio del blog'}
+                    {beforeDate && <> hasta <strong className="text-slate-300">{fmtDate(new Date(beforeDate + 'T23:59:59Z').getTime())}</strong></>}
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleTumblrImport(false)}
+                  disabled={isRunning || tumblrLoading || !beforeDate}
+                  className="w-full py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2
+                    bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20
+                    disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+                >
+                  {tumblrLoading ? (
+                    <><Spinner /> Iniciando…</>
+                  ) : isRunning ? (
+                    '⏳ Importación en progreso'
+                  ) : (
+                    'Iniciar importación Tumblr'
+                  )}
+                </button>
+
+                {tumblrError && <ErrorBox message={tumblrError} />}
+              </div>
+            </div>
+          </div>
+
+          {/* X card */}
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+            <div className="px-6 py-5 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center font-black text-white text-base">
+                  𝕏
+                </div>
+                <div>
+                  <h2 className="font-bold text-white">X / Twitter</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Archivo <code className="text-slate-300">tweet.js</code> · filtra RT y respuestas</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-5 space-y-4">
+              {/* Upload zone */}
+              <label className={`flex flex-col items-center justify-center gap-3 border-2 border-dashed rounded-xl py-10 cursor-pointer transition-all ${
+                isRunning || xLoading
+                  ? 'border-slate-700 cursor-not-allowed'
+                  : 'border-slate-700 hover:border-indigo-500/60 hover:bg-indigo-500/5'
+              }`}>
+                <div className="text-4xl">
+                  {xLoading ? '⏳' : '📂'}
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-white">
+                    {xLoading ? 'Procesando…' : isRunning ? 'Job en progreso' : 'Subir tweet.js'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {xLoading ? 'Esto puede tardar unos minutos' : '.js · .json · máx 50 MB recomendado'}
+                  </p>
+                </div>
+                <input ref={fileRef} type="file" accept=".js,.json" className="hidden" onChange={handleXFile} disabled={isRunning || xLoading} />
+              </label>
+
+              {/* How to */}
+              <details className="group">
+                <summary className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer hover:text-slate-300 transition-colors select-none list-none">
+                  <span className="group-open:rotate-90 inline-block transition-transform duration-150">›</span>
+                  Cómo obtener el export de X
+                </summary>
+                <ol className="mt-3 space-y-1.5 text-xs text-slate-400 ml-4 list-decimal leading-relaxed">
+                  <li>Ajustes → Tu cuenta → <strong className="text-slate-300">Descargar un archivo de tus datos</strong></li>
+                  <li>Solicitar archivo completo (puede tardar hasta 24h)</li>
+                  <li>Descomprimir el zip → buscar <code className="text-slate-300 bg-slate-800 px-1 rounded">data/tweet.js</code></li>
+                  <li>Subir ese archivo aquí</li>
+                </ol>
+              </details>
+
+              {xError && <ErrorBox message={xError} />}
+            </div>
           </div>
         </div>
-      )}
 
-      {jobs !== undefined && (jobs as any[]).length === 0 && (
-        <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg">
-          <p className="text-gray-500">No hay importaciones registradas</p>
-          <p className="text-sm text-gray-400 mt-1">Inicia una importación para poblar el catálogo</p>
-        </div>
-      )}
+        {/* ── Imported items browser ── */}
+        <ImportedItemsBrowser />
+
+        {/* ── Job history ── */}
+        {jobs !== undefined && (jobs as any[]).length > 0 && (
+          <div className="space-y-3">
+            <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Historial de importaciones</h2>
+            <div className="rounded-2xl border border-slate-800 bg-slate-900 divide-y divide-slate-800 overflow-hidden">
+              {(jobs as any[]).map((job: any) => (
+                <JobRow key={job._id} job={job} />
+              ))}
+            </div>
+          </div>
+        )}
+
+      </div>
     </div>
   )
 }
 
-// ── Active job banner ─────────────────────────────────────────────────────────
+// ── Active job card ───────────────────────────────────────────────────────────
 
-function ActiveJobBanner({ job }: { job: any }) {
+function ActiveJobCard({ job }: { job: any }) {
   const total    = job.itemsTotal ?? 0
   const imported = job.itemsImported ?? 0
   const failed   = job.itemsFailed ?? 0
-  const pct      = total > 0 ? Math.round((imported + failed) / total * 100) : 0
+  const done     = imported + failed
+  const pct      = total > 0 ? Math.min(100, Math.round(done / total * 100)) : null
   const cursor: number | undefined = job.configJson?.cursorTs
+  const source   = job.source === 'tumblr' ? 'Tumblr' : 'X / Twitter'
 
   return (
-    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-          <span className="text-sm font-semibold text-blue-800">
-            Importando {SOURCE_LABEL[job.source] ?? job.source}…
+    <div className="rounded-2xl overflow-hidden bg-gradient-to-br from-blue-600 to-indigo-700 p-6 shadow-xl shadow-blue-500/20">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <span className="w-3 h-3 rounded-full bg-white animate-pulse inline-block shadow-lg" />
+          <span className="font-bold text-white text-lg">Importando {source}</span>
+        </div>
+        {cursor && (
+          <span className="text-blue-200 text-xs bg-blue-500/30 px-2.5 py-1 rounded-full">
+            cursor: {fmtDate(cursor)}
           </span>
+        )}
+      </div>
+
+      <div className="space-y-2 mb-4">
+        <div className="flex justify-between text-sm">
+          <span className="text-blue-100 font-medium">{imported.toLocaleString()} importados{failed > 0 && <span className="text-red-300 ml-2">{failed} fallidos</span>}</span>
+          {total > 0 && <span className="text-blue-200">{pct}% de ~{total.toLocaleString()}</span>}
         </div>
-        <div className="flex items-center gap-3 text-xs text-blue-600">
-          {cursor && <span>Cursor: {fmtDate(cursor)}</span>}
-          {total > 0 && <span>{pct}%</span>}
+        <div className="h-2.5 bg-blue-500/40 rounded-full overflow-hidden">
+          {pct !== null ? (
+            <div className="h-full bg-white rounded-full transition-all duration-700 shadow-sm" style={{ width: `${pct}%` }} />
+          ) : (
+            <div className="h-full bg-white/60 rounded-full animate-pulse w-full" />
+          )}
         </div>
       </div>
 
-      {total > 0 && (
-        <div className="h-2 bg-blue-100 rounded-full overflow-hidden">
-          <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${pct}%` }} />
-        </div>
-      )}
-
-      <div className="flex gap-4 text-xs text-blue-700">
-        <span>Importados: <strong>{imported}</strong></span>
-        {failed > 0 && <span className="text-red-600">Fallidos: <strong>{failed}</strong></span>}
-        {total > 0 && <span className="text-gray-500">Total estimado: {total}</span>}
-      </div>
+      <p className="text-xs text-blue-200/70">
+        Corriendo en segundo plano · puedes cerrar el navegador · se actualiza automáticamente
+      </p>
     </div>
   )
 }
 
-// ── Job row ───────────────────────────────────────────────────────────────────
+// ── Imported items browser ────────────────────────────────────────────────────
 
-function JobRow({ job }: { job: any }) {
-  const [showErrors, setShowErrors] = useState(false)
-  const errors: any[] = (job.configJson as any)?.errors ?? []
-  const cursor: number | undefined = (job.configJson as any)?.cursorTs
-  const afterTs: number | undefined = (job.configJson as any)?.afterTs
-  const beforeTs: number | undefined = (job.configJson as any)?.beforeTs
+function ImportedItemsBrowser() {
+  const [platform, setPlatform] = useState<'all' | 'tumblr' | 'x'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'in_review' | 'approved'>('all')
+  const [approving, setApproving] = useState<string | null>(null)
+
+  const { results, status, loadMore } = usePaginatedQuery(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    api.contentItems.list as any,
+    { contentOrigin: 'imported' },
+    { initialNumItems: 30 }
+  )
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const approveItem = useMutation(api.contentItems.approve as any)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filtered = (results as any[]).filter((i: any) => {
+    if (platform !== 'all' && i.sourcePlatform !== platform) return false
+    if (statusFilter !== 'all' && i.status !== statusFilter) return false
+    return true
+  })
+
+  async function handleApprove(id: string) {
+    setApproving(id)
+    try { await approveItem({ id }) } finally { setApproving(null) }
+  }
 
   return (
-    <div className="px-4 py-3 bg-white text-sm">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOR[job.status] ?? 'bg-gray-100 text-gray-600'}`}>
-            {STATUS_LABEL[job.status] ?? job.status}
-          </span>
-          <span className="font-medium text-gray-800">
-            {SOURCE_LABEL[job.source] ?? job.source}
-          </span>
-        </div>
-        <span className="text-xs text-gray-400">
-          {job.startedAt ? new Date(job.startedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Posts importados</h2>
+        <span className="text-xs text-slate-600">
+          {status === 'LoadingFirstPage' ? '' : `${filtered.length}${status === 'CanLoadMore' ? '+' : ''}`}
         </span>
       </div>
 
-      <div className="flex flex-wrap gap-4 mt-1.5 text-xs text-gray-500">
-        <span>Importados: <strong className="text-gray-700">{job.itemsImported}</strong></span>
-        {job.itemsFailed > 0 && (
-          <span className="text-red-600">Fallidos: <strong>{job.itemsFailed}</strong></span>
-        )}
-        {job.itemsTotal > 0 && <span>Total estimado: {job.itemsTotal}</span>}
-        {job.completedAt && (
-          <span>Duración: {Math.round((job.completedAt - (job.startedAt ?? job.completedAt)) / 1000)}s</span>
-        )}
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2">
+        <TabGroup
+          value={platform}
+          onChange={v => setPlatform(v as typeof platform)}
+          options={[
+            { value: 'all',    label: 'Todos' },
+            { value: 'tumblr', label: '📷 Tumblr' },
+            { value: 'x',      label: '𝕏 X' },
+          ]}
+        />
+        <TabGroup
+          value={statusFilter}
+          onChange={v => setStatusFilter(v as typeof statusFilter)}
+          options={[
+            { value: 'all',       label: 'Todos los estados' },
+            { value: 'in_review', label: 'Por revisar' },
+            { value: 'approved',  label: 'Aprobados' },
+          ]}
+        />
       </div>
 
-      {/* Date range info */}
+      {/* List */}
+      {status === 'LoadingFirstPage' ? (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 py-16 text-center">
+          <div className="flex flex-col items-center gap-2">
+            <Spinner />
+            <p className="text-slate-400 text-sm">Cargando…</p>
+          </div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/50 py-16 text-center">
+          <p className="text-2xl mb-2">📭</p>
+          <p className="text-slate-400 text-sm font-medium">Sin posts con este filtro</p>
+          <p className="text-slate-600 text-xs mt-1">Inicia una importación para poblar el catálogo</p>
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-slate-800 bg-slate-900 divide-y divide-slate-800/60 overflow-hidden">
+          {filtered.map((item: any) => {
+            const statusCfg = ITEM_STATUS_CONFIG[item.status] ?? { label: item.status, cls: 'bg-gray-100 text-gray-500' }
+            const canApprove = ['draft', 'in_review', 'researching'].includes(item.status)
+            return (
+              <div key={item._id} className="px-5 py-4 flex items-start gap-4 hover:bg-slate-800/40 transition-colors group">
+                {/* Platform dot */}
+                <div className="shrink-0 mt-0.5 w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-base">
+                  {item.sourcePlatform === 'tumblr' ? '📷' : item.sourcePlatform === 'x' ? '𝕏' : '•'}
+                </div>
+
+                {/* Content */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center flex-wrap gap-2 mb-1.5">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${statusCfg.cls}`}>
+                      {statusCfg.label}
+                    </span>
+                    {item.needsReview && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-medium">
+                        Revisar
+                      </span>
+                    )}
+                    {item.sourceDate && (
+                      <span className="text-[10px] text-slate-500 ml-auto">{fmtDate(item.sourceDate)}</span>
+                    )}
+                  </div>
+                  <p className="text-sm font-semibold text-slate-100 truncate leading-snug">{item.title}</p>
+                  {item.summary && (
+                    <p className="text-xs text-slate-500 mt-1 line-clamp-1 leading-relaxed">{item.summary}</p>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="shrink-0 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {item.sourcePostUrl && (
+                    <a
+                      href={item.sourcePostUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-8 h-8 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs transition-colors"
+                      title="Ver post original"
+                    >
+                      ↗
+                    </a>
+                  )}
+                  <Link
+                    href={`/catalog/${item._id}`}
+                    className="h-8 px-3 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium flex items-center transition-colors"
+                  >
+                    Editar
+                  </Link>
+                  {canApprove && (
+                    <button
+                      type="button"
+                      onClick={() => handleApprove(item._id)}
+                      disabled={approving === item._id}
+                      className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-50 transition-colors flex items-center gap-1"
+                    >
+                      {approving === item._id ? <><Spinner /> …</> : '✓ Aprobar'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+
+          {status === 'CanLoadMore' && (
+            <div className="px-5 py-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => loadMore(20)}
+                className="text-sm text-indigo-400 hover:text-indigo-300 font-medium transition-colors flex items-center gap-1.5"
+              >
+                Cargar 20 más ↓
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Job history row ───────────────────────────────────────────────────────────
+
+function JobRow({ job }: { job: any }) {
+  const [open, setOpen] = useState(false)
+  const errors: any[] = job.configJson?.errors ?? []
+  const cursor:   number | undefined = job.configJson?.cursorTs
+  const afterTs:  number | undefined = job.configJson?.afterTs
+  const beforeTs: number | undefined = job.configJson?.beforeTs
+  const cfg = JOB_STATUS_CONFIG[job.status] ?? JOB_STATUS_CONFIG.pending
+  const duration = job.completedAt && job.startedAt ? Math.round((job.completedAt - job.startedAt) / 1000) : null
+
+  return (
+    <div className="px-5 py-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className={`w-2 h-2 rounded-full inline-block ${cfg.dot}`} />
+          <span className={`text-[11px] px-2.5 py-0.5 rounded-full font-semibold ${cfg.pill}`}>
+            {cfg.label}
+          </span>
+          <span className="text-sm font-medium text-slate-300">
+            {job.source === 'tumblr' ? '📷 Tumblr' : '𝕏 X / Twitter'}
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span className="text-slate-300 font-semibold">{(job.itemsImported ?? 0).toLocaleString()} posts</span>
+          {job.itemsFailed > 0 && <span className="text-red-400">{job.itemsFailed} err</span>}
+          {duration !== null && <span>{duration}s</span>}
+          {job.startedAt && <span>{fmtDateTime(job.startedAt)}</span>}
+        </div>
+      </div>
+
       {(beforeTs || cursor || afterTs) && (
-        <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-gray-400">
-          {beforeTs && <span>Hasta: {fmtDate(beforeTs)}</span>}
-          {cursor && cursor !== beforeTs && <span>Marca agua: {fmtDate(cursor)}</span>}
-          {afterTs && <span>Desde: {fmtDate(afterTs)}</span>}
+        <div className="flex flex-wrap gap-4 mt-2 text-[11px] text-slate-600 ml-5">
+          {beforeTs && <span>Hasta: <span className="text-slate-400">{fmtDate(beforeTs)}</span></span>}
+          {cursor && cursor !== beforeTs && (
+            <span>Marca agua: <span className="text-indigo-400 font-medium">{fmtDate(cursor)}</span></span>
+          )}
+          {afterTs && <span>Desde: <span className="text-slate-400">{fmtDate(afterTs)}</span></span>}
         </div>
       )}
 
       {errors.length > 0 && (
-        <div className="mt-2">
-          <button type="button" onClick={() => setShowErrors(v => !v)} className="text-xs text-red-600 hover:underline">
-            {showErrors ? '▲ Ocultar' : '▼ Ver'} {errors.length} error{errors.length !== 1 ? 'es' : ''}
+        <>
+          <button type="button" onClick={() => setOpen(v => !v)} className="mt-2 ml-5 text-xs text-red-400 hover:text-red-300 transition-colors">
+            {open ? '▲' : '▼'} {errors.length} error{errors.length !== 1 ? 'es' : ''}
           </button>
-          {showErrors && (
-            <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+          {open && (
+            <div className="mt-2 space-y-1 max-h-32 overflow-y-auto rounded-lg border border-red-900/50 bg-red-950/30 p-3 ml-5">
               {errors.map((e: any, i: number) => (
-                <div key={i} className="text-xs bg-red-50 border border-red-100 rounded px-2 py-1">
-                  <span className="font-medium text-red-700 block truncate">{e.title}</span>
-                  <span className="text-red-500">{e.error}</span>
+                <div key={i} className="text-xs">
+                  <span className="font-medium text-red-400 block truncate">{e.title}</span>
+                  <span className="text-red-600">{e.error}</span>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </>
       )}
+    </div>
+  )
+}
+
+// ── Shared components ─────────────────────────────────────────────────────────
+
+function TabGroup({ value, onChange, options }: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+}) {
+  return (
+    <div className="flex rounded-xl border border-slate-700 overflow-hidden bg-slate-900 text-xs p-0.5 gap-0.5">
+      {options.map(opt => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+            value === opt.value
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+    </svg>
+  )
+}
+
+function ErrorBox({ message }: { message: string }) {
+  return (
+    <div className="rounded-xl bg-red-950/50 border border-red-900/60 px-4 py-3 text-sm text-red-300 flex items-start gap-2">
+      <span className="shrink-0 mt-0.5 text-red-400">⚠</span>
+      <span>{message}</span>
     </div>
   )
 }
