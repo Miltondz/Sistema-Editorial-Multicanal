@@ -13,9 +13,10 @@ import { parseTweetExport, normalizeTweetToContentItem } from '../../lib/integra
 
 export const processTumblrBatch = internalAction({
   args: {
-    jobId:    v.id('importJobs'),
-    cursorTs: v.number(),           // "before" timestamp in ms (decreases each batch)
-    afterTs:  v.optional(v.number()), // ms — stop when posts are older than this
+    jobId:          v.id('importJobs'),
+    cursorTs:       v.number(),
+    afterTs:        v.optional(v.number()),
+    downloadImages: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<void> => {
     const blogName = process.env.TUMBLR_BLOG_NAME
@@ -66,8 +67,38 @@ export const processTumblrBatch = internalAction({
         sourceDate:     n.sourceDate,
       }))
 
-      const result: { imported: number; skipped: number; errors: any[] } =
+      const result: { imported: number; skipped: number; newIds: string[]; errors: any[] } =
         await ctx.runMutation(internal.contentItems.importBatchInternal, { items: normalized })
+
+      // If downloadImages=true, fetch & store each cover image in Convex storage
+      if (args.downloadImages && result.newIds.length > 0) {
+        const withImages = filtered.map(normalizeTumblrPost).filter(n => n.coverImageUrl)
+        for (const norm of withImages) {
+          const itemId = result.newIds.find((_id, i) =>
+            normalized[i]?.sourcePostId === norm.sourcePostId
+          )
+          if (!itemId || !norm.coverImageUrl) continue
+          try {
+            const imgRes = await fetch(norm.coverImageUrl)
+            if (!imgRes.ok) continue
+            const blob = await imgRes.blob()
+            const mimeType = blob.type || 'image/jpeg'
+            const storageId = await ctx.storage.store(blob)
+            const publicUrl = await ctx.storage.getUrl(storageId)
+            if (!publicUrl) continue
+            await ctx.runMutation(internal.mediaAssets.saveForImportInternal, {
+              contentItemId: itemId as any,
+              storageId,
+              publicUrl,
+              mimeType,
+              sourceUrl:    norm.coverImageUrl,
+              fileSizeBytes: blob.size,
+            })
+          } catch {
+            // non-fatal — image download failure doesn't abort batch
+          }
+        }
+      }
 
       await ctx.runMutation(internal.importJobs.updateProgress, {
         id:            args.jobId,
@@ -91,9 +122,10 @@ export const processTumblrBatch = internalAction({
 
     // Schedule next batch — 600ms gap respects Tumblr rate limit (~250 req/hr)
     await ctx.scheduler.runAfter(600, internal.actions.importer.processTumblrBatch, {
-      jobId:    args.jobId,
-      cursorTs: oldestTs,
-      afterTs:  args.afterTs,
+      jobId:          args.jobId,
+      cursorTs:       oldestTs,
+      afterTs:        args.afterTs,
+      downloadImages: args.downloadImages,
     })
   },
 })
@@ -111,6 +143,7 @@ export const startTumblrImport = action({
     beforeDate:       v.optional(v.string()),
     afterDate:        v.optional(v.string()),
     continueFromLast: v.optional(v.boolean()),
+    downloadImages:   v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{ jobId: string }> => {
     const blogName = process.env.TUMBLR_BLOG_NAME
@@ -135,14 +168,15 @@ export const startTumblrImport = action({
 
     const jobId: string = await ctx.runMutation(internal.importJobs.createInternal, {
       source:     'tumblr',
-      configJson: { beforeTs, afterTs, cursorTs: beforeTs },
+      configJson: { beforeTs, afterTs, cursorTs: beforeTs, downloadImages: args.downloadImages ?? false },
     })
 
     // Schedule first batch immediately
     await ctx.scheduler.runAfter(0, internal.actions.importer.processTumblrBatch, {
-      jobId:    jobId as any,
-      cursorTs: beforeTs,
+      jobId:          jobId as any,
+      cursorTs:       beforeTs,
       afterTs,
+      downloadImages: args.downloadImages,
     })
 
     return { jobId }

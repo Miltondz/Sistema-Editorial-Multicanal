@@ -116,8 +116,20 @@ export function CatalogTable({
                     </td>
                   )}
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900 text-sm">{item.title}</div>
-                    {item.franchise && <div className="text-xs text-gray-400">{item.franchise}</div>}
+                    <div className="flex items-center gap-3">
+                      {(item as any).coverImageUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={(item as any).coverImageUrl}
+                          alt=""
+                          className="w-9 h-9 rounded object-cover shrink-0 border border-gray-200"
+                        />
+                      )}
+                      <div>
+                        <div className="font-medium text-gray-900 text-sm">{item.title}</div>
+                        {item.franchise && <div className="text-xs text-gray-400">{item.franchise}</div>}
+                      </div>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">{TYPE_LABELS[item.contentType] ?? item.contentType}</td>
                   <td className="px-4 py-3">

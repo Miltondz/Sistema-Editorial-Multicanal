@@ -1,4 +1,4 @@
-import { query, mutation, internalQuery } from './_generated/server'
+import { query, mutation, internalQuery, internalMutation } from './_generated/server'
 import { v } from 'convex/values'
 
 export const generateUploadUrl = mutation({
@@ -87,6 +87,38 @@ export const listByItemInternal = internalQuery({
       .query('mediaAssets')
       .withIndex('by_item', q => q.eq('contentItemId', args.contentItemId))
       .collect()
+  },
+})
+
+export const saveForImportInternal = internalMutation({
+  args: {
+    contentItemId: v.id('contentItems'),
+    storageId:     v.id('_storage'),
+    publicUrl:     v.string(),
+    mimeType:      v.string(),
+    sourceUrl:     v.optional(v.string()),
+    width:         v.optional(v.number()),
+    height:        v.optional(v.number()),
+    fileSizeBytes: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const count = await ctx.db
+      .query('mediaAssets')
+      .withIndex('by_item', q => q.eq('contentItemId', args.contentItemId))
+      .collect()
+    return await ctx.db.insert('mediaAssets', {
+      contentItemId: args.contentItemId,
+      storageId:     args.storageId,
+      publicUrl:     args.publicUrl,
+      mimeType:      args.mimeType,
+      sourceUrl:     args.sourceUrl,
+      sourceKind:    'tumblr_import',
+      isPrimary:     count.length === 0,
+      sortOrder:     count.length,
+      width:         args.width,
+      height:        args.height,
+      fileSizeBytes: args.fileSizeBytes,
+    })
   },
 })
 

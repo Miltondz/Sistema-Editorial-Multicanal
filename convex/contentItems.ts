@@ -187,10 +187,12 @@ export const importBatchInternal = internalMutation({
   handler: async (ctx: any, args: any): Promise<{
     imported: number
     skipped:  number
+    newIds:   string[]
     errors:   Array<{ sourceId: string; title: string; error: string }>
   }> => {
     let imported = 0
     let skipped  = 0
+    const newIds: string[] = []
     const errors: Array<{ sourceId: string; title: string; error: string }> = []
 
     for (const item of args.items) {
@@ -255,6 +257,7 @@ export const importBatchInternal = internalMutation({
           payloadJson: { contentOrigin: 'imported', sourcePlatform: item.sourcePlatform },
         })
 
+        newIds.push(itemId)
         imported++
       } catch (err) {
         errors.push({
@@ -265,7 +268,7 @@ export const importBatchInternal = internalMutation({
       }
     }
 
-    return { imported, skipped, errors }
+    return { imported, skipped, newIds, errors }
   },
 })
 

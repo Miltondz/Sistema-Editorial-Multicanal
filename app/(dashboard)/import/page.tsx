@@ -65,6 +65,8 @@ export default function ImportPage() {
   const [xError,        setXError]        = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const [downloadImages, setDownloadImages] = useState(false)
+
   const [blogInfo, setBlogInfo]         = useState<{ totalPosts: number; newestTs?: number; oldestTs?: number } | null>(null)
   const [blogInfoLoading, setBlogInfoLoading] = useState(false)
   const [blogInfoError,   setBlogInfoError]   = useState<string | null>(null)
@@ -104,9 +106,10 @@ export default function ImportPage() {
     setTumblrLoading(true); setTumblrError(null)
     try {
       await startTumblrImport({
-        beforeDate: continueFromLast ? undefined : (beforeDate || undefined),
-        afterDate:  continueFromLast ? undefined : (afterDate  || undefined),
+        beforeDate:     continueFromLast ? undefined : (beforeDate || undefined),
+        afterDate:      continueFromLast ? undefined : (afterDate  || undefined),
         continueFromLast,
+        downloadImages,
       })
     } catch (err) {
       setTumblrError(err instanceof Error ? err.message : 'Error desconocido')
@@ -287,6 +290,30 @@ export default function ImportPage() {
                     {beforeDate && <> hasta <strong className="text-slate-300">{fmtDate(new Date(beforeDate + 'T23:59:59Z').getTime())}</strong></>}
                   </p>
                 )}
+
+                {/* Image mode toggle */}
+                <div
+                  className={`flex items-center justify-between rounded-xl px-4 py-3 border cursor-pointer transition-all ${
+                    downloadImages
+                      ? 'border-emerald-500/40 bg-emerald-500/10'
+                      : 'border-slate-700 bg-slate-800/50'
+                  }`}
+                  onClick={() => !isRunning && setDownloadImages(v => !v)}
+                >
+                  <div>
+                    <p className={`text-sm font-semibold ${downloadImages ? 'text-emerald-300' : 'text-slate-300'}`}>
+                      {downloadImages ? '⬇ Descargar imágenes a storage' : '🔗 Referenciar URL de imágenes'}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {downloadImages
+                        ? 'Cada imagen se descarga y sube a Convex storage — más lento, permanente'
+                        : 'Solo guarda la URL de Tumblr CDN — rápido, pero depende del CDN externo'}
+                    </p>
+                  </div>
+                  <div className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ml-3 ${downloadImages ? 'bg-emerald-500' : 'bg-slate-600'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${downloadImages ? 'left-5' : 'left-0.5'}`} />
+                  </div>
+                </div>
 
                 <button
                   type="button"

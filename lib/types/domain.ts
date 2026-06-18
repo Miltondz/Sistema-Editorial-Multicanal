@@ -66,6 +66,7 @@ export interface ContentItem {
   sourcePostUrl?: string
   sourcePostId?: string
   sourceDate?: number
+  coverImageUrl?: string
 
   enrichedManually: boolean
 
