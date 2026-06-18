@@ -8,6 +8,7 @@ import { useState, useRef } from 'react'
 
 type Channel = 'tumblr' | 'x'
 type DayPart = 'morning' | 'afternoon' | 'evening'
+type Week = (string | null)[]  // 7 slots, null = out-of-month day
 
 const DAY_PARTS: DayPart[] = ['morning', 'afternoon', 'evening']
 const DAY_PART_LABELS: Record<DayPart, string> = {
@@ -19,6 +20,11 @@ const DAY_PART_HOURS: Record<DayPart, string> = {
   morning:   '~8–11 am',
   afternoon: '~12–3 pm',
   evening:   '~6–9 pm',
+}
+const DAY_PART_SHORT: Record<DayPart, string> = {
+  morning:   'Mañ',
+  afternoon: 'Tard',
+  evening:   'Noc',
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -55,12 +61,29 @@ const TYPE_COLORS: Record<string, string> = {
   coleccion: 'bg-indigo-100 text-indigo-700',
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 const MONTH_NAMES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ]
+
+const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+
+// Grid column template shared by all rows: label col + 7 day cols
+const GRID_COLS = '80px repeat(7, minmax(0, 1fr))'
+
+// ── Date helpers ──────────────────────────────────────────────────────────────
+
+/** Local-timezone today — NOT UTC (avoids off-by-one in UTC-N timezones) */
+function todayStr(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function isPast(d: string, today: string): boolean { return d < today }
+
 
 function getMonthBounds(year: number, month: number) {
   const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
@@ -76,31 +99,44 @@ function getDaysInMonth(year: number, month: number): string[] {
   const dates: string[] = []
   const cur = new Date(startDate + 'T00:00:00Z')
   const end = new Date(endDate   + 'T00:00:00Z')
-  while (cur <= end) { dates.push(cur.toISOString().slice(0, 10)); cur.setUTCDate(cur.getUTCDate() + 1) }
+  while (cur <= end) {
+    dates.push(cur.toISOString().slice(0, 10))
+    cur.setUTCDate(cur.getUTCDate() + 1)
+  }
   return dates
 }
 
-function todayStr() { return new Date().toISOString().slice(0, 10) }
-function isPast(d: string) { return d < todayStr() }
-
-function weekdayShort(dateStr: string) {
-  return ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][new Date(dateStr + 'T00:00:00Z').getUTCDay()]
+/**
+ * Build calendar weeks with Mon=col0 alignment (ISO week).
+ * Returns array of Week (7 items each). null = out-of-month padding.
+ */
+function getCalendarWeeks(year: number, month: number): Week[] {
+  const days = getDaysInMonth(year, month)
+  const firstUTCWeekday = new Date(days[0] + 'T00:00:00Z').getUTCDay()  // 0=Sun
+  const monOffset = (firstUTCWeekday + 6) % 7  // Mon=0, Tue=1, ..., Sun=6
+  const grid: (string | null)[] = [...Array(monOffset).fill(null), ...days]
+  while (grid.length % 7 !== 0) grid.push(null)
+  const weeks: Week[] = []
+  for (let i = 0; i < grid.length; i += 7) weeks.push(grid.slice(i, i + 7))
+  return weeks
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function PlannerPage() {
   const now = new Date()
-  const [year,  setYear]  = useState(now.getFullYear())
-  const [month, setMonth] = useState(now.getMonth())
+  const today = todayStr()
+
+  const [year,    setYear]    = useState(now.getFullYear())
+  const [month,   setMonth]   = useState(now.getMonth())
   const [channel, setChannel] = useState<Channel>('tumblr')
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedSlot, setSelectedSlot] = useState<any | null>(null)
-  const [addCell, setAddCell]           = useState<{ date: string; dayPart: DayPart } | null>(null)
-  const [actionMsg, setActionMsg]       = useState<string | null>(null)
+  const [addCell,      setAddCell]      = useState<{ date: string; dayPart: DayPart } | null>(null)
+  const [actionMsg,    setActionMsg]    = useState<string | null>(null)
 
-  // Drag state
+  // Drag state — ref avoids re-renders during drag
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const draggingRef = useRef<any | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
@@ -108,7 +144,7 @@ export default function PlannerPage() {
   const { startDate, endDate } = getMonthBounds(year, month)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rawSlots = useQuery(api.scheduleSlots.listByDateRangeWithItems as any, { startDate, endDate, channel })
+  const rawSlots   = useQuery(api.scheduleSlots.listByDateRangeWithItems as any, { startDate, endDate, channel })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const xWriteCount = useQuery(api.publicationLog.getXWriteCountThisMonth as any, {})
 
@@ -134,7 +170,7 @@ export default function PlannerPage() {
   const [genError,    setGenError]    = useState<string | null>(null)
   const [recomputing, setRecomputing] = useState(false)
 
-  // Build slot map: `${date}:${dayPart}` → slot[] (multiple per cell)
+  // Build slotMap: `${date}:${dayPart}` → slot[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slotMap = new Map<string, any[]>()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -145,10 +181,14 @@ export default function PlannerPage() {
     slotMap.set(key, arr)
   }
 
-  const days = getDaysInMonth(year, month)
+  const weeks = getCalendarWeeks(year, month)
 
-  function prevMonth() { month === 0 ? (setYear(y => y - 1), setMonth(11)) : setMonth(m => m - 1) }
-  function nextMonth() { month === 11 ? (setYear(y => y + 1), setMonth(0)) : setMonth(m => m + 1) }
+  function prevMonth() {
+    if (month === 0) { setYear(y => y - 1); setMonth(11) } else { setMonth(m => m - 1) }
+  }
+  function nextMonth() {
+    if (month === 11) { setYear(y => y + 1); setMonth(0) } else { setMonth(m => m + 1) }
+  }
 
   async function handleGenerate() {
     setGenerating(true); setGenError(null); setGenResult(null)
@@ -171,8 +211,11 @@ export default function PlannerPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function handleReschedule(slot: any, newDate: string, newDayPart: DayPart) {
     setActionMsg(null)
-    try { await reschedule({ id: slot._id, scheduledFor: newDate, dayPart: newDayPart }); setSelectedSlot(null); setActionMsg('Reprogramado.') }
-    catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
+    try {
+      await reschedule({ id: slot._id, scheduledFor: newDate, dayPart: newDayPart })
+      setSelectedSlot(null)
+      setActionMsg('Reprogramado.')
+    } catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -185,16 +228,18 @@ export default function PlannerPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function handleUnassign(slot: any) {
     setActionMsg(null)
-    try { await assignSlot({ id: slot._id, contentItemId: undefined, variantId: undefined, status: 'empty' }); setSelectedSlot(null); setActionMsg('Contenido desasignado.') }
-    catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
+    try {
+      await assignSlot({ id: slot._id, contentItemId: undefined, variantId: undefined, status: 'empty' })
+      setSelectedSlot(null)
+      setActionMsg('Contenido desasignado.')
+    } catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
   }
 
   // ── Drag handlers ────────────────────────────────────────────────────────────
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function onDragStart(slot: any) {
-    draggingRef.current = slot
-  }
+  function onDragStart(slot: any) { draggingRef.current = slot }
+  function onDragEnd()            { draggingRef.current = null; setDropTarget(null) }
 
   async function onDrop(targetDate: string, targetDayPart: DayPart) {
     setDropTarget(null)
@@ -210,21 +255,24 @@ export default function PlannerPage() {
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <div className="p-4 max-w-[1400px] mx-auto">
+
+      {/* ── Header ── */}
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Planner editorial</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            Arrastra para mover · clic para editar · + para agregar en una franja
+            Arrastra para mover · clic para editar · + para agregar
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => { setYear(now.getFullYear()); setMonth(now.getMonth()) }}
+          <button type="button"
+            onClick={() => { setYear(now.getFullYear()); setMonth(now.getMonth()) }}
             className="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
             Hoy
           </button>
-          <button type="button" onClick={async () => { setRecomputing(true); try { await recomputeScores({ channel }) } finally { setRecomputing(false) } }}
+          <button type="button"
+            onClick={async () => { setRecomputing(true); try { await recomputeScores({ channel }) } finally { setRecomputing(false) } }}
             disabled={recomputing}
             className="px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50">
             {recomputing ? 'Calculando…' : 'Actualizar scores'}
@@ -236,130 +284,111 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* Feedback */}
+      {/* ── Feedback ── */}
       {genResult && (
-        <div className="mb-4 px-4 py-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
-          {genResult.slotsCreated} slots creados, {genResult.slotsSkipped} sin candidato elegible.
+        <div className="mb-3 px-4 py-2.5 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+          {genResult.slotsCreated} slots creados, {genResult.slotsSkipped} sin candidato.
         </div>
       )}
-      {genError && <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{genError}</div>}
+      {genError && (
+        <div className="mb-3 px-4 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {genError}
+        </div>
+      )}
       {actionMsg && (
-        <div className={`mb-4 px-4 py-3 rounded-lg text-sm border ${actionMsg.startsWith('Error') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-800'}`}>
+        <div className={`mb-3 px-4 py-2.5 rounded-lg text-sm border ${
+          actionMsg.startsWith('Error')
+            ? 'bg-red-50 border-red-200 text-red-700'
+            : 'bg-green-50 border-green-200 text-green-800'
+        }`}>
           {actionMsg}
         </div>
       )}
 
-      {/* Controls */}
+      {/* ── Controls ── */}
       <div className="flex flex-wrap items-center gap-4 mb-4">
         <div className="flex items-center gap-2">
-          <button type="button" onClick={prevMonth} className="p-1.5 border border-gray-300 rounded hover:bg-gray-50">◀</button>
-          <span className="font-semibold text-gray-800 min-w-[140px] text-center">{MONTH_NAMES[month]} {year}</span>
-          <button type="button" onClick={nextMonth} className="p-1.5 border border-gray-300 rounded hover:bg-gray-50">▶</button>
+          <button type="button" onClick={prevMonth}
+            className="p-1.5 border border-gray-300 rounded hover:bg-gray-50 text-gray-600">◀</button>
+          <span className="font-semibold text-gray-800 min-w-[160px] text-center text-base">
+            {MONTH_NAMES[month]} {year}
+          </span>
+          <button type="button" onClick={nextMonth}
+            className="p-1.5 border border-gray-300 rounded hover:bg-gray-50 text-gray-600">▶</button>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
-            {(['tumblr', 'x'] as Channel[]).map(ch => (
-              <button key={ch} type="button" onClick={() => setChannel(ch)}
-                className={`px-4 py-1.5 text-sm font-medium transition-colors ${channel === ch ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
-                {ch === 'tumblr' ? 'Tumblr' : 'X'}
-              </button>
-            ))}
-          </div>
-          {channel === 'x' && xWriteCount !== undefined && (
-            <span className={`text-xs px-2 py-1 rounded-full font-medium ${xWriteCount >= 400 ? 'bg-red-100 text-red-700' : xWriteCount >= 300 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
-              X: {xWriteCount}/500 este mes
-            </span>
-          )}
+
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+          {(['tumblr', 'x'] as Channel[]).map(ch => (
+            <button key={ch} type="button" onClick={() => setChannel(ch)}
+              className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+                channel === ch ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'
+              }`}>
+              {ch === 'tumblr' ? 'Tumblr' : 'X'}
+            </button>
+          ))}
         </div>
+
+        {channel === 'x' && xWriteCount !== undefined && (
+          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+            xWriteCount >= 400 ? 'bg-red-100 text-red-700'
+            : xWriteCount >= 300 ? 'bg-amber-100 text-amber-700'
+            : 'bg-gray-100 text-gray-600'
+          }`}>
+            X: {xWriteCount}/500 este mes
+          </span>
+        )}
       </div>
 
-      {/* Calendar */}
+      {/* ── Calendar grid ── */}
       {rawSlots === undefined ? (
         <div className="text-sm text-gray-400 text-center py-16">Cargando…</div>
       ) : (
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
-          {/* Header */}
-          <div className="grid grid-cols-4 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            <div className="px-3 py-2">Día</div>
-            {DAY_PARTS.map(dp => (
-              <div key={dp} className="px-3 py-2">
-                {DAY_PART_LABELS[dp]}
-                <span className="font-normal text-gray-400 ml-1">{DAY_PART_HOURS[dp]}</span>
+        <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+
+          {/* Weekday column headers */}
+          <div
+            className="border-b border-gray-200 bg-gray-50"
+            style={{ display: 'grid', gridTemplateColumns: GRID_COLS }}
+          >
+            <div className="px-2 py-2" />
+            {WEEKDAY_LABELS.map(label => (
+              <div key={label}
+                className="px-2 py-2 text-xs font-semibold text-center text-gray-600 uppercase tracking-wide border-l border-gray-200">
+                {label}
               </div>
             ))}
           </div>
 
-          {/* Rows */}
-          <div className="divide-y divide-gray-100">
-            {days.map(date => {
-              const past = isPast(date)
-              const isToday = date === todayStr()
-              return (
-                <div key={date} className={`grid grid-cols-4 ${past ? 'opacity-55' : ''}`}>
-                  {/* Date label */}
-                  <div className={`px-3 py-2 flex flex-col justify-start border-r border-gray-100 pt-3 ${isToday ? 'bg-indigo-50' : 'bg-gray-50'}`}>
-                    <span className={`text-sm font-bold ${isToday ? 'text-indigo-700' : 'text-gray-700'}`}>
-                      {parseInt(date.slice(8), 10)}
-                      {isToday && <span className="ml-1 text-[10px] font-normal text-indigo-500">hoy</span>}
-                    </span>
-                    <span className="text-xs text-gray-400">{weekdayShort(date)}</span>
-                  </div>
-
-                  {/* Slot columns */}
-                  {DAY_PARTS.map(dayPart => {
-                    const cellKey = `${date}:${dayPart}`
-                    const slots = slotMap.get(cellKey) ?? []
-                    const isDropTarget = dropTarget === cellKey
-
-                    return (
-                      <div
-                        key={dayPart}
-                        className={`px-2 py-2 border-r border-gray-100 last:border-r-0 min-h-[80px] flex flex-col gap-1.5 transition-colors ${
-                          isDropTarget ? 'bg-indigo-50 ring-2 ring-indigo-300 ring-inset' : 'hover:bg-gray-50/50'
-                        }`}
-                        onDragOver={e => { if (draggingRef.current) { e.preventDefault(); setDropTarget(cellKey) } }}
-                        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null) }}
-                        onDrop={e => { e.preventDefault(); onDrop(date, dayPart) }}
-                      >
-                        {/* Existing slot pills */}
-                        {slots.map(slot => (
-                          <SlotPill
-                            key={slot._id}
-                            slot={slot}
-                            onDragStart={() => onDragStart(slot)}
-                            onDragEnd={() => { draggingRef.current = null; setDropTarget(null) }}
-                            onClick={() => { setSelectedSlot(slot); setActionMsg(null) }}
-                          />
-                        ))}
-
-                        {/* Add button (always shown for future cells) */}
-                        {!past && (
-                          <button
-                            type="button"
-                            onClick={() => setAddCell({ date, dayPart })}
-                            className="self-start text-[10px] text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 px-1.5 py-0.5 rounded transition-colors"
-                          >
-                            + agregar
-                          </button>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })}
+          {/* Week bands */}
+          <div className="divide-y divide-gray-200">
+            {weeks.map((week, wi) => (
+              <WeekBand
+                key={wi}
+                week={week}
+                slotMap={slotMap}
+                today={today}
+                dropTarget={dropTarget}
+                draggingRef={draggingRef}
+                setDropTarget={setDropTarget}
+                onDrop={onDrop}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onSlotClick={(slot) => { setSelectedSlot(slot); setActionMsg(null) }}
+                onAddClick={(date, dayPart) => setAddCell({ date, dayPart })}
+              />
+            ))}
           </div>
         </div>
       )}
 
-      {/* Legend */}
-      <div className="mt-4 flex flex-wrap gap-2 text-xs text-gray-500">
+      {/* ── Legend ── */}
+      <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
         {Object.entries(STATUS_LABELS).filter(([k]) => k !== 'empty').map(([k, label]) => (
           <span key={k} className={`px-2 py-0.5 rounded ${STATUS_COLORS[k]}`}>{label}</span>
         ))}
       </div>
 
-      {/* Slot Detail Modal */}
+      {/* ── Modals ── */}
       {selectedSlot && (
         <SlotDetailModal
           slot={selectedSlot}
@@ -373,7 +402,6 @@ export default function PlannerPage() {
         />
       )}
 
-      {/* Add Slot Modal */}
       {addCell && (
         <AddSlotModal
           date={addCell.date}
@@ -395,13 +423,140 @@ export default function PlannerPage() {
   )
 }
 
-// ── SlotPill ─────────────────────────────────────────────────────────────────
+// ── WeekBand ──────────────────────────────────────────────────────────────────
+// One full week: date header row + 3 time-band rows
+
+function WeekBand({
+  week, slotMap, today, dropTarget, draggingRef,
+  setDropTarget, onDrop, onDragStart, onDragEnd, onSlotClick, onAddClick,
+}: {
+  week: Week
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  slotMap: Map<string, any[]>
+  today: string
+  dropTarget: string | null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  draggingRef: React.MutableRefObject<any>
+  setDropTarget: (k: string | null) => void
+  onDrop: (date: string, dayPart: DayPart) => void
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onDragStart: (slot: any) => void
+  onDragEnd: () => void
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onSlotClick: (slot: any) => void
+  onAddClick: (date: string, dayPart: DayPart) => void
+}) {
+  return (
+    <div>
+      {/* Date number header row */}
+      <div
+        className="border-b border-gray-100 bg-gray-50/60"
+        style={{ display: 'grid', gridTemplateColumns: GRID_COLS }}
+      >
+        <div className="px-2 py-1 text-[10px] text-gray-400 font-medium" />
+        {week.map((date, i) => {
+          if (!date) return (
+            <div key={`empty-${i}`}
+              className="border-l border-gray-200 bg-gray-50/80 px-2 py-1" />
+          )
+          const isToday = date === today
+          return (
+            <div key={date}
+              className={`border-l border-gray-200 px-2 py-1 text-center ${isToday ? 'bg-indigo-50' : ''}`}>
+              <span className={`text-sm font-bold ${isToday ? 'text-indigo-600' : 'text-gray-700'}`}>
+                {parseInt(date.slice(8), 10)}
+              </span>
+              {isToday && (
+                <span className="ml-1 text-[9px] text-indigo-400 font-normal">hoy</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Three time-band rows */}
+      {DAY_PARTS.map(dayPart => (
+        <div
+          key={dayPart}
+          className="border-b border-gray-100 last:border-b-0"
+          style={{ display: 'grid', gridTemplateColumns: GRID_COLS }}
+        >
+          {/* Band label */}
+          <div className="px-2 py-2 flex flex-col justify-center border-r border-gray-100 bg-gray-50/40">
+            <span className="text-[10px] font-semibold text-gray-500 uppercase leading-none">
+              {DAY_PART_SHORT[dayPart]}
+            </span>
+            <span className="text-[9px] text-gray-300 mt-0.5 leading-none">
+              {DAY_PART_HOURS[dayPart]}
+            </span>
+          </div>
+
+          {/* Day cells for this time band */}
+          {week.map((date, i) => {
+            if (!date) return (
+              <div key={`empty-${i}`}
+                className="border-l border-gray-100 bg-gray-50/60 min-h-[52px]" />
+            )
+
+            const cellKey = `${date}:${dayPart}`
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const slots: any[] = slotMap.get(cellKey) ?? []
+            const past = isPast(date, today)
+            const isDropTarget = dropTarget === cellKey
+            const isToday = date === today
+
+            return (
+              <div
+                key={date}
+                className={`border-l border-gray-100 px-1.5 py-1.5 min-h-[52px] flex flex-col gap-1 transition-colors ${
+                  isDropTarget
+                    ? 'bg-indigo-50 ring-2 ring-inset ring-indigo-300'
+                    : isToday
+                    ? 'bg-indigo-50/30'
+                    : past
+                    ? 'bg-gray-50/40'
+                    : 'hover:bg-slate-50'
+                }`}
+                onDragOver={e => {
+                  if (draggingRef.current) { e.preventDefault(); setDropTarget(cellKey) }
+                }}
+                onDragLeave={e => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null)
+                }}
+                onDrop={e => { e.preventDefault(); onDrop(date, dayPart) }}
+              >
+                {slots.map(slot => (
+                  <SlotPill
+                    key={slot._id}
+                    slot={slot}
+                    onDragStart={() => onDragStart(slot)}
+                    onDragEnd={onDragEnd}
+                    onClick={() => onSlotClick(slot)}
+                  />
+                ))}
+                {!past && (
+                  <button
+                    type="button"
+                    onClick={() => onAddClick(date, dayPart)}
+                    className="self-center text-[10px] text-gray-300 hover:text-indigo-500 leading-none py-0.5 px-1 rounded hover:bg-indigo-50 transition-colors"
+                    title="Agregar slot"
+                  >
+                    +
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── SlotPill ──────────────────────────────────────────────────────────────────
 
 function SlotPill({
-  slot,
-  onDragStart,
-  onDragEnd,
-  onClick,
+  slot, onDragStart, onDragEnd, onClick,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slot: any
@@ -418,27 +573,25 @@ function SlotPill({
       onDragStart={e => { e.stopPropagation(); onDragStart() }}
       onDragEnd={onDragEnd}
       onClick={onClick}
-      title={draggable ? 'Arrastra para mover · clic para editar' : 'Clic para editar'}
-      className={`rounded-md px-2 py-1.5 text-xs cursor-pointer select-none transition-all ${colorClass} ${
-        draggable ? 'hover:brightness-95 active:opacity-70' : 'cursor-default'
+      title={slot.item?.title ?? 'Sin contenido'}
+      className={`rounded px-1.5 py-1 text-[10px] select-none transition-all cursor-pointer ${colorClass} ${
+        draggable ? 'hover:brightness-95 active:opacity-70' : 'opacity-80'
       }`}
-      style={{ opacity: draggable ? 1 : 0.85 }}
     >
-      <div className="flex items-center gap-1.5 mb-0.5">
-        {slot.locked && <span title="Bloqueado">🔒</span>}
-        <span className={`px-1 py-0 rounded text-[10px] font-medium ${
-          (TYPE_COLORS[slot.item?.contentType] ?? 'bg-gray-100 text-gray-600')
+      <div className="flex items-center gap-1 mb-0.5">
+        {slot.locked && <span title="Bloqueado" className="text-[9px]">🔒</span>}
+        <span className={`px-1 rounded text-[9px] font-medium ${
+          TYPE_COLORS[slot.item?.contentType] ?? 'bg-gray-100 text-gray-600'
         }`}>
           {slot.item?.contentType ?? '—'}
         </span>
         {slot.contentMode === 'recycled' && (
-          <span className="text-[10px] bg-amber-100 text-amber-600 px-1 rounded">♻</span>
+          <span className="text-[9px] bg-amber-100 text-amber-600 px-0.5 rounded">♻</span>
         )}
       </div>
-      <p className="font-medium leading-snug line-clamp-2">
-        {slot.item?.title ?? <span className="italic text-gray-400">Sin contenido</span>}
+      <p className="font-medium leading-tight line-clamp-2 text-[10px]">
+        {slot.item?.title ?? <span className="italic opacity-60">Sin contenido</span>}
       </p>
-      <p className="text-[10px] mt-0.5 opacity-70">{STATUS_LABELS[slot.status] ?? slot.status}</p>
     </div>
   )
 }
@@ -500,7 +653,9 @@ function SlotDetailModal({
                 )}
               </div>
               {slot.item._id && (
-                <Link href={`/catalog/${slot.item._id}`} className="text-xs text-indigo-600 hover:underline mt-1 block" onClick={onClose}>
+                <Link href={`/catalog/${slot.item._id}`}
+                  className="text-xs text-indigo-600 hover:underline mt-1 block"
+                  onClick={onClose}>
                   Abrir en editor →
                 </Link>
               )}
@@ -515,16 +670,28 @@ function SlotDetailModal({
           <div className="mb-4">
             <p className="text-xs font-medium text-gray-700 mb-2">Reprogramar</p>
             <div className="flex gap-2">
-              <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)}
-                className="flex-1 px-2 py-1.5 text-sm text-gray-900 bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-              <select value={newDayPart} onChange={e => setNewDayPart(e.target.value as DayPart)}
-                className="px-2 py-1.5 text-sm text-gray-900 bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                {DAY_PARTS.map(dp => <option key={dp} value={dp}>{DAY_PART_LABELS[dp]}</option>)}
+              <input
+                type="date"
+                value={newDate}
+                onChange={e => setNewDate(e.target.value)}
+                className="flex-1 px-2 py-1.5 text-sm text-gray-900 bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              />
+              <select
+                value={newDayPart}
+                onChange={e => setNewDayPart(e.target.value as DayPart)}
+                className="px-2 py-1.5 text-sm text-gray-900 bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              >
+                {DAY_PARTS.map(dp => (
+                  <option key={dp} value={dp}>{DAY_PART_LABELS[dp]}</option>
+                ))}
               </select>
             </div>
             {dateChanged && (
-              <button type="button" onClick={() => onReschedule(newDate, newDayPart)}
-                className="mt-2 w-full px-3 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+              <button
+                type="button"
+                onClick={() => onReschedule(newDate, newDayPart)}
+                className="mt-2 w-full px-3 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+              >
                 Confirmar cambio de fecha
               </button>
             )}
@@ -533,7 +700,11 @@ function SlotDetailModal({
 
         {/* Feedback */}
         {actionMsg && (
-          <div className={`mb-3 px-3 py-2 rounded text-xs border ${actionMsg.startsWith('Error') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-800'}`}>
+          <div className={`mb-3 px-3 py-2 rounded text-xs border ${
+            actionMsg.startsWith('Error')
+              ? 'bg-red-50 border-red-200 text-red-700'
+              : 'bg-green-50 border-green-200 text-green-800'
+          }`}>
             {actionMsg}
             {actionMsg.includes('ariante') && slot.item?._id && (
               <Link href={`/catalog/${slot.item._id}`} className="block mt-1 underline font-medium" onClick={onClose}>
@@ -551,22 +722,31 @@ function SlotDetailModal({
         {/* Actions */}
         <div className="flex flex-col gap-2">
           {canPublishNow && (
-            <button type="button" disabled={publishing}
+            <button
+              type="button"
+              disabled={publishing}
               onClick={async () => { setPublishing(true); await onPublishNow(); setPublishing(false) }}
-              className="w-full px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50">
+              className="w-full px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+            >
               {publishing ? 'Publicando…' : 'Publicar ahora'}
             </button>
           )}
 
-          <button type="button" onClick={onToggleLock}
-            className="w-full px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
+          <button
+            type="button"
+            onClick={onToggleLock}
+            className="w-full px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+          >
             {slot.locked ? '🔓 Desbloquear' : '🔒 Bloquear slot'}
           </button>
 
           {slot.contentItemId && !slot.locked && !['published', 'publishing'].includes(slot.status) && (
-            <button type="button" onClick={onUnassign}
-              className="w-full px-4 py-2 text-sm border border-amber-200 text-amber-700 rounded-md hover:bg-amber-50">
-              Desasignar contenido (dejar slot vacío)
+            <button
+              type="button"
+              onClick={onUnassign}
+              className="w-full px-4 py-2 text-sm border border-amber-200 text-amber-700 rounded-md hover:bg-amber-50"
+            >
+              Desasignar contenido
             </button>
           )}
 
@@ -612,14 +792,21 @@ function AddSlotModal({
         </div>
         <div className="mb-4 p-3 bg-gray-50 rounded-lg text-sm text-gray-700 space-y-1">
           <p><span className="font-medium">Fecha:</span> {date}</p>
-          <p><span className="font-medium">Franja:</span> {DAY_PART_LABELS[dayPart]} <span className="text-gray-400">{DAY_PART_HOURS[dayPart]}</span></p>
+          <p>
+            <span className="font-medium">Franja:</span> {DAY_PART_LABELS[dayPart]}
+            <span className="text-gray-400 ml-1">{DAY_PART_HOURS[dayPart]}</span>
+          </p>
           <p><span className="font-medium">Canal:</span> {channel === 'tumblr' ? 'Tumblr' : 'X'}</p>
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          El slot se creará vacío. Usa "Generar calendario" para asignarle contenido, o asígnalo manualmente desde el editor.
+          El slot se creará vacío. Usa &quot;Generar calendario&quot; para asignarle contenido, o asígnalo manualmente desde el editor.
         </p>
         {actionMsg && (
-          <div className={`mb-3 px-3 py-2 rounded text-xs border ${actionMsg.startsWith('Error') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-800'}`}>
+          <div className={`mb-3 px-3 py-2 rounded text-xs border ${
+            actionMsg.startsWith('Error')
+              ? 'bg-red-50 border-red-200 text-red-700'
+              : 'bg-green-50 border-green-200 text-green-800'
+          }`}>
             {actionMsg}
           </div>
         )}
