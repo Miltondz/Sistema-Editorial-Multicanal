@@ -126,8 +126,9 @@ export async function publishPost(
     } else {
       payload = {
         type: 'photo',
-        // Legacy API: pass source as array for multiple images or string for one
-        source: imageUrls.length === 1 ? imageUrls[0] : imageUrls,
+        // Legacy API source must be a single string URL.
+        // Multi-photo requires base64 data upload — not supported here; use first image.
+        source: imageUrls[0],
         caption: params.caption ?? '',
         tags: params.tags.join(','),
       }

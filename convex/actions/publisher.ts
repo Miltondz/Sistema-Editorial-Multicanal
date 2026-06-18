@@ -59,7 +59,7 @@ function buildTumblrPayload(
       postType === 'text'
         ? `<h2>${variant.headline ?? ''}</h2>\n${variant.bodyText ?? ''}\n\n${variant.ctaText ?? ''}`.trim()
         : undefined,
-    imageUrls: postType === 'photo' ? mediaAssets.map(a => a.publicUrl).slice(0, 10) : undefined,
+    imageUrls: postType === 'photo' ? mediaAssets.map(a => a.publicUrl).slice(0, 1) : undefined,
     linkUrl: postType === 'link' ? item.buyLink ?? undefined : undefined,
     linkTitle: postType === 'link' ? variant.headline ?? undefined : undefined,
     linkDescription: postType === 'link' ? variant.bodyText ?? undefined : undefined,
