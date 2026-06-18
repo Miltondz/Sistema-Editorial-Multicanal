@@ -10,7 +10,10 @@ function fmtDate(ms: number) {
   return new Date(ms).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 function fmtDateTime(ms: number) {
-  return new Date(ms).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })
+  const d = new Date(ms)
+  const date = d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+  const time = d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+  return `${date} ${time}`
 }
 function todayISO() {
   const d = new Date()
