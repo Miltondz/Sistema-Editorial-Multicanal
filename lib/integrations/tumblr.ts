@@ -47,6 +47,31 @@ export async function fetchOnePage(
   }
 }
 
+/** Fetch blog info + oldest post using offset = total-1.
+ *  Two API calls. Returns total count and oldest post timestamp in ms. */
+export async function fetchBlogInfo(
+  blogName: string
+): Promise<{ totalPosts: number; newestTs?: number; oldestTs?: number }> {
+  const client = createTumblrClient()
+  const first = await client.blogPosts(blogName, { limit: 1, reblog_info: false, notes_info: false })
+  const totalPosts = Number(first.blog?.total_posts ?? first.total_posts ?? 0)
+  const newestPost = ((first.posts ?? []) as TumblrPost[])[0]
+  const newestTs = newestPost ? newestPost.timestamp * 1000 : undefined
+  if (totalPosts <= 1) return { totalPosts, newestTs, oldestTs: newestTs }
+  const last = await client.blogPosts(blogName, {
+    limit: 1,
+    offset: Math.max(0, totalPosts - 1),
+    reblog_info: false,
+    notes_info: false,
+  })
+  const oldestPost = ((last.posts ?? []) as TumblrPost[])[0]
+  return {
+    totalPosts,
+    newestTs,
+    oldestTs: oldestPost ? oldestPost.timestamp * 1000 : undefined,
+  }
+}
+
 /** Legacy single-action full fetch — kept for backwards compat. */
 export async function fetchAllPosts(
   blogName: string,

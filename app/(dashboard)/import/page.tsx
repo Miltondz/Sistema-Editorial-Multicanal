@@ -46,11 +46,13 @@ export default function ImportPage() {
   const lastTumblr = useQuery(api.importJobs.getLastTumblrJob as any)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const startTumblrImport = useAction((api.actions as any).importer.startTumblrImport)
+  const startTumblrImport  = useAction((api.actions as any).importer.startTumblrImport)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const processXExport    = useAction((api.actions as any).importer.processXExport)
+  const getTumblrBlogInfo  = useAction((api.actions as any).importer.getTumblrBlogInfo)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const generateUploadUrl = useMutation(api.importJobs.generateUploadUrl as any)
+  const processXExport     = useAction((api.actions as any).importer.processXExport)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const generateUploadUrl  = useMutation(api.importJobs.generateUploadUrl as any)
 
   const [beforeDate, setBeforeDate] = useState(todayISO())
   const [afterDate,  setAfterDate]  = useState('')
@@ -59,6 +61,26 @@ export default function ImportPage() {
   const [xLoading,      setXLoading]      = useState(false)
   const [xError,        setXError]        = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const [blogInfo, setBlogInfo]         = useState<{ totalPosts: number; newestTs?: number; oldestTs?: number } | null>(null)
+  const [blogInfoLoading, setBlogInfoLoading] = useState(false)
+  const [blogInfoError,   setBlogInfoError]   = useState<string | null>(null)
+
+  async function handleFetchBlogInfo() {
+    setBlogInfoLoading(true); setBlogInfoError(null)
+    try {
+      const info = await getTumblrBlogInfo({}) as { totalPosts: number; newestTs?: number; oldestTs?: number }
+      setBlogInfo(info)
+      if (info.oldestTs) {
+        const d = new Date(info.oldestTs)
+        setAfterDate(`${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`)
+      }
+    } catch (err) {
+      setBlogInfoError(err instanceof Error ? err.message : 'Error')
+    } finally {
+      setBlogInfoLoading(false)
+    }
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const isRunning      = (active as any)?.status === 'running'
@@ -193,7 +215,46 @@ export default function ImportPage() {
 
               {/* Date range form */}
               <div className="space-y-3">
-                <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Nuevo rango</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Nuevo rango</p>
+                  <button
+                    type="button"
+                    onClick={handleFetchBlogInfo}
+                    disabled={blogInfoLoading || isRunning}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 disabled:opacity-40 transition-colors flex items-center gap-1"
+                  >
+                    {blogInfoLoading ? <><Spinner /> Consultando…</> : '📡 Consultar blog'}
+                  </button>
+                </div>
+
+                {/* Blog info banner */}
+                {blogInfo && (
+                  <div className="rounded-xl bg-slate-800/70 border border-slate-700 px-4 py-3 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Info del blog</span>
+                      <span className="text-xs font-bold text-white">{blogInfo.totalPosts.toLocaleString()} posts totales</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      {blogInfo.newestTs && (
+                        <div>
+                          <span className="text-slate-500">Más reciente</span>
+                          <p className="text-slate-200 font-semibold">{fmtDate(blogInfo.newestTs)}</p>
+                        </div>
+                      )}
+                      {blogInfo.oldestTs && (
+                        <div>
+                          <span className="text-slate-500">Más antiguo</span>
+                          <p className="text-emerald-400 font-bold">{fmtDate(blogInfo.oldestTs)}</p>
+                        </div>
+                      )}
+                    </div>
+                    {blogInfo.oldestTs && (
+                      <p className="text-[10px] text-slate-600">↑ "Desde" se completó automáticamente con la fecha del post más antiguo</p>
+                    )}
+                  </div>
+                )}
+                {blogInfoError && <ErrorBox message={blogInfoError} />}
+
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1.5">Hasta</label>

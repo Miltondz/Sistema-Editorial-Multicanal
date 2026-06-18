@@ -4,7 +4,7 @@
 import { action, internalAction } from '../_generated/server'
 import { internal } from '../_generated/api'
 import { v } from 'convex/values'
-import { fetchOnePage, normalizeTumblrPost } from '../../lib/integrations/tumblr'
+import { fetchOnePage, fetchBlogInfo, normalizeTumblrPost } from '../../lib/integrations/tumblr'
 import { parseTweetExport, normalizeTweetToContentItem } from '../../lib/integrations/x'
 
 // ── processTumblrBatch ────────────────────────────────────────────────────────
@@ -145,6 +145,18 @@ export const startTumblrImport = action({
     })
 
     return { jobId }
+  },
+})
+
+// ── getTumblrBlogInfo ─────────────────────────────────────────────────────────
+// Returns total post count + newest/oldest post dates — 2 API calls.
+
+export const getTumblrBlogInfo = action({
+  args: {},
+  handler: async (_ctx): Promise<{ totalPosts: number; newestTs?: number; oldestTs?: number }> => {
+    const blogName = process.env.TUMBLR_BLOG_NAME
+    if (!blogName) throw new Error('TUMBLR_BLOG_NAME env var not set')
+    return await fetchBlogInfo(blogName)
   },
 })
 
