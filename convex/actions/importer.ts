@@ -59,6 +59,7 @@ export const processTumblrBatch = internalAction({
         title:          n.title,
         summary:        n.summary,
         buyLink:        n.buyLink,
+        coverImageUrl:  n.coverImageUrl,
         sourcePlatform: 'tumblr' as const,
         sourcePostId:   n.sourcePostId,
         sourcePostUrl:  n.sourcePostUrl,

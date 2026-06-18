@@ -512,8 +512,13 @@ function ImportedItemsBrowser() {
             return (
               <div key={item._id} className="px-5 py-4 flex items-start gap-4 hover:bg-slate-800/40 transition-colors group">
                 {/* Platform dot */}
-                <div className="shrink-0 mt-0.5 w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-base">
-                  {item.sourcePlatform === 'tumblr' ? '📷' : item.sourcePlatform === 'x' ? '𝕏' : '•'}
+                <div className="shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center text-base">
+                  {item.coverImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.coverImageUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    item.sourcePlatform === 'tumblr' ? '📷' : item.sourcePlatform === 'x' ? '𝕏' : '•'
+                  )}
                 </div>
 
                 {/* Content */}

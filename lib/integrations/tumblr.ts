@@ -114,22 +114,25 @@ export function normalizeTumblrPost(post: TumblrPost): {
   sourcePostUrl: string
   sourceDate: number
   buyLink?: string
+  coverImageUrl?: string
 } {
   const rawHtml = post.caption ?? post.body ?? post.title ?? post.description ?? ''
   const rawText = rawHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
   const title = (rawText.slice(0, 100) || `Tumblr post ${post.id}`).trim()
   const summary = rawText.slice(0, 500) || undefined
+  const coverImageUrl = post.photos?.[0]?.original_size?.url ?? undefined
 
   return {
     title,
     summary,
-    contentType: 'comic',   // provisional — for editorial review
+    contentType: 'comic',
     sourcePlatform: 'tumblr',
     contentOrigin: 'imported',
     sourcePostId: post.id,
     sourcePostUrl: post.post_url,
     sourceDate: post.timestamp * 1000,
     buyLink: post.type === 'link' ? post.url ?? undefined : undefined,
+    coverImageUrl,
   }
 }
 

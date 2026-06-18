@@ -88,6 +88,7 @@ export default defineSchema({
     sourcePostUrl: v.optional(v.string()),
     sourcePostId: v.optional(v.string()),
     sourceDate: v.optional(v.number()),
+    coverImageUrl: v.optional(v.string()),
 
     enrichedManually: v.boolean(),
 
