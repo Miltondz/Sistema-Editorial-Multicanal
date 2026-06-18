@@ -183,6 +183,50 @@ export const startTumblrImport = action({
   },
 })
 
+// ── downloadCoverToStorage ────────────────────────────────────────────────────
+// Fetches a cover URL reference, uploads to Convex storage, creates mediaAsset,
+// and updates contentItem.coverImageUrl to point to the new Convex URL.
+
+export const downloadCoverToStorage = action({
+  args: { contentItemId: v.id('contentItems') },
+  handler: async (ctx, args): Promise<{ publicUrl: string }> => {
+    const item = await ctx.runQuery(internal.contentItems.getByIdInternal, { id: args.contentItemId }) as any
+    if (!item) throw new Error('Item no encontrado')
+    const sourceUrl: string | undefined = item.coverImageUrl
+    if (!sourceUrl) throw new Error('Este item no tiene coverImageUrl')
+
+    const res = await fetch(sourceUrl)
+    if (!res.ok) throw new Error(`Error al descargar imagen: ${res.status} ${res.statusText}`)
+    const blob = await res.blob()
+    const mimeType = blob.type || 'image/jpeg'
+
+    const storageId = await ctx.storage.store(blob)
+    const publicUrl = await ctx.storage.getUrl(storageId)
+    if (!publicUrl) throw new Error('Error al obtener URL de storage')
+
+    // Check existing mediaAssets to avoid duplicates
+    const existing = await ctx.runQuery(internal.mediaAssets.listByItemInternal, { contentItemId: args.contentItemId })
+    const alreadyStored = (existing as any[]).some((a: any) => a.sourceUrl === sourceUrl)
+    if (!alreadyStored) {
+      await ctx.runMutation(internal.mediaAssets.saveForImportInternal, {
+        contentItemId: args.contentItemId,
+        storageId,
+        publicUrl,
+        mimeType,
+        sourceUrl,
+        fileSizeBytes: blob.size,
+      })
+    }
+
+    await ctx.runMutation(internal.contentItems.patchCoverImageUrlInternal, {
+      id: args.contentItemId,
+      coverImageUrl: publicUrl,
+    })
+
+    return { publicUrl }
+  },
+})
+
 // ── getTumblrBlogInfo ─────────────────────────────────────────────────────────
 // Returns total post count + newest/oldest post dates — 2 API calls.
 

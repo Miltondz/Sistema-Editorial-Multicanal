@@ -1,10 +1,11 @@
 'use client'
 import Link from 'next/link'
-import { useQuery } from 'convex/react'
+import { useQuery, useAction } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { ContentEditor } from '@/components/editor/ContentEditor'
 import type { Id } from '@/convex/_generated/dataModel'
 import type { ContentItem, MediaAsset } from '@/lib/types/domain'
+import { useState } from 'react'
 
 export default function EditItemPage({ params }: { params: { id: string } }) {
   const data = useQuery(api.contentItems.getById, {
@@ -32,6 +33,8 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
 
   const { variants: _v, scores, ...item } = data
   const itemWithMedia = { ...item, media: data.media } as unknown as ContentItem & { media: MediaAsset[] }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const coverImageUrl: string | undefined = (item as any).coverImageUrl
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -40,6 +43,10 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
           ← Volver al catálogo
         </Link>
       </div>
+
+      {/* Cover image panel */}
+      {coverImageUrl && <CoverImagePanel itemId={params.id} coverImageUrl={coverImageUrl} />}
+
       <div className="bg-white rounded-lg border border-gray-200 p-8">
         <ContentEditor
           mode="edit"
@@ -85,6 +92,74 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function CoverImagePanel({ itemId, coverImageUrl }: { itemId: string; coverImageUrl: string }) {
+  const [loading, setLoading] = useState(false)
+  const [done, setDone]       = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const [imgError, setImgError] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const downloadAction = useAction((api.actions as any).importer.downloadCoverToStorage)
+
+  const isStoredInConvex = coverImageUrl.includes('convex.cloud') || coverImageUrl.includes('convex.site')
+
+  async function handleDownload() {
+    setLoading(true); setError(null)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await downloadAction({ contentItemId: itemId as any })
+      setDone(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-5 mb-4 flex items-start gap-4">
+      <div className="w-24 h-24 rounded-lg overflow-hidden border border-gray-200 shrink-0 bg-gray-50 flex items-center justify-center">
+        {!imgError ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={coverImageUrl}
+            alt="Cover"
+            className="w-full h-full object-cover"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <span className="text-3xl">🖼️</span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Imagen de portada</p>
+        {isStoredInConvex ? (
+          <p className="text-sm text-emerald-600 font-medium">✓ Almacenada en Convex storage</p>
+        ) : (
+          <>
+            <p className="text-xs text-gray-400 truncate mb-3">{coverImageUrl}</p>
+            <p className="text-xs text-amber-600 mb-3">
+              ⚠ Referencia externa — la imagen depende del CDN de Tumblr
+            </p>
+            {done ? (
+              <p className="text-sm text-emerald-600 font-medium">✓ Imagen descargada y guardada</p>
+            ) : (
+              <button
+                type="button"
+                onClick={handleDownload}
+                disabled={loading}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {loading ? '⏳ Descargando…' : '⬇ Guardar imagen a storage'}
+              </button>
+            )}
+            {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+          </>
+        )}
+      </div>
     </div>
   )
 }

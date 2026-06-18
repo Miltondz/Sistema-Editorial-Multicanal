@@ -272,6 +272,13 @@ export const importBatchInternal = internalMutation({
   },
 })
 
+export const patchCoverImageUrlInternal = internalMutation({
+  args: { id: v.id('contentItems'), coverImageUrl: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { coverImageUrl: args.coverImageUrl })
+  },
+})
+
 // ── MUTATIONS ──────────────────────────────────────────────────────────────
 
 export const create = mutation({
