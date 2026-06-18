@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation } from './_generated/server'
+import { query, mutation, internalMutation, internalQuery } from './_generated/server'
 import { internal } from './_generated/api'
 import { v } from 'convex/values'
 
@@ -51,26 +51,72 @@ export const generateUploadUrl = mutation({
 
 // ── Internal mutations ────────────────────────────────────────────────────────
 
+/** Last Tumblr job — public (used by UI to show watermark) */
+export const getLastTumblrJob = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query('importJobs')
+      .withIndex('by_source', q => q.eq('source', 'tumblr'))
+      .order('desc')
+      .first()
+  },
+})
+
+/** Internal version — callable from internalAction (startTumblrImport) */
+export const getLastTumblrJobInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query('importJobs')
+      .withIndex('by_source', q => q.eq('source', 'tumblr'))
+      .order('desc')
+      .first()
+  },
+})
+
+/** Internal getById — callable from internalAction (processTumblrBatch) */
+export const getByIdInternal = internalQuery({
+  args: { id: v.id('importJobs') },
+  handler: async (ctx, args) => ctx.db.get(args.id),
+})
+
 export const createInternal = internalMutation({
-  args: { source: importSourceV },
+  args: {
+    source:     importSourceV,
+    configJson: v.optional(v.any()),
+  },
   handler: async (ctx, args): Promise<string> => {
     const jobId = await ctx.db.insert('importJobs', {
-      source: args.source,
-      status: 'running',
-      itemsTotal: 0,
+      source:        args.source,
+      status:        'running',
+      itemsTotal:    0,
       itemsImported: 0,
-      itemsFailed: 0,
-      startedAt: Date.now(),
+      itemsFailed:   0,
+      startedAt:     Date.now(),
+      configJson:    args.configJson,
     })
 
     await ctx.runMutation(internal.auditEvents.log, {
       entityType: 'importJob',
-      entityId: jobId,
-      eventType: 'import.started',
+      entityId:   jobId,
+      eventType:  'import.started',
       payloadJson: { source: args.source },
     })
 
     return jobId
+  },
+})
+
+/** Save cursor (oldest timestamp seen so far) after each batch */
+export const updateCursorInternal = internalMutation({
+  args: { id: v.id('importJobs'), cursorTs: v.number() },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.id)
+    if (!job) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const existing = (job.configJson as any) ?? {}
+    await ctx.db.patch(args.id, { configJson: { ...existing, cursorTs: args.cursorTs } })
   },
 })
 

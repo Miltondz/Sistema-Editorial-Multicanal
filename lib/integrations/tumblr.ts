@@ -30,6 +30,24 @@ export interface TumblrPost {
 
 const TUMBLR_PAGE_SIZE = 20
 
+/** Single-page fetch using `before` timestamp cursor (ms epoch).
+ *  Tumblr API accepts `before` in Unix seconds; we convert internally.
+ *  Returns posts (newest-first within page) and the blog total post count. */
+export async function fetchOnePage(
+  blogName: string,
+  { beforeMs, limit = TUMBLR_PAGE_SIZE }: { beforeMs?: number; limit?: number }
+): Promise<{ posts: TumblrPost[]; totalPosts: number }> {
+  const client = createTumblrClient()
+  const params: Record<string, unknown> = { limit, reblog_info: false, notes_info: false }
+  if (beforeMs !== undefined) params.before = Math.floor(beforeMs / 1000) // API expects Unix seconds
+  const response = await client.blogPosts(blogName, params)
+  return {
+    posts:      (response.posts ?? []) as TumblrPost[],
+    totalPosts: Number(response.blog?.total_posts ?? response.total_posts ?? 0),
+  }
+}
+
+/** Legacy single-action full fetch — kept for backwards compat. */
 export async function fetchAllPosts(
   blogName: string,
   onPage: (posts: TumblrPost[]) => Promise<void>
@@ -48,16 +66,12 @@ export async function fetchAllPosts(
 
     const posts = (response.posts ?? []) as TumblrPost[]
 
-    if (posts.length === 0) {
-      hasMore = false
-      break
-    }
+    if (posts.length === 0) { hasMore = false; break }
 
     await onPage(posts)
     offset += posts.length
 
     if (posts.length === TUMBLR_PAGE_SIZE) {
-      // Rate-limit courtesy: ~250 req/hour in OAuth
       await new Promise(resolve => setTimeout(resolve, 500))
     } else {
       hasMore = false
