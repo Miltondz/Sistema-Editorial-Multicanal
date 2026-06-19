@@ -4,6 +4,7 @@ import { useQuery, useMutation, useAction } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
 import type { Channel, VariantStatus } from '@/lib/types/domain'
+import { RichTextEditor } from './RichTextEditor'
 
 const STATUS_LABELS: Record<VariantStatus, string> = {
   not_started: 'Sin empezar',
@@ -250,29 +251,26 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
-              Cuerpo {channel === 'x' ? '(máx 150 caracteres)' : '(HTML — ver vista previa abajo)'}
+              Cuerpo {channel === 'x' ? '(máx 150 caracteres, texto plano)' : '(editor de texto enriquecido)'}
             </label>
-            <textarea
-              value={form.bodyText}
-              onChange={e => setForm(f => ({ ...f, bodyText: e.target.value }))}
-              maxLength={channel === 'x' ? 150 : undefined}
-              rows={channel === 'x' ? 3 : 6}
-              className={`${INPUT_CLASS} font-mono text-xs`}
-            />
-            {channel === 'x' && (
-              <p className="text-xs text-gray-400 mt-0.5 text-right">
-                {form.bodyText.length}/150
-              </p>
-            )}
-            {/* Live HTML preview for Tumblr edit mode */}
-            {channel === 'tumblr' && form.bodyText && (
-              <div className="mt-2">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Vista previa en tiempo real</p>
-                <div
-                  className="border border-gray-200 rounded px-3 py-2 bg-white prose prose-sm max-w-none text-gray-800 [&_h2]:text-base [&_h2]:font-bold [&_p]:my-1 [&_a]:text-indigo-600 [&_a]:underline"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(form.bodyText) }}
+            {channel === 'tumblr' ? (
+              <RichTextEditor
+                value={form.bodyText}
+                onChange={html => setForm(f => ({ ...f, bodyText: html }))}
+              />
+            ) : (
+              <>
+                <textarea
+                  value={form.bodyText}
+                  onChange={e => setForm(f => ({ ...f, bodyText: e.target.value }))}
+                  maxLength={150}
+                  rows={3}
+                  className={`${INPUT_CLASS} font-mono text-xs`}
                 />
-              </div>
+                <p className="text-xs text-gray-400 mt-0.5 text-right">
+                  {form.bodyText.length}/150
+                </p>
+              </>
             )}
           </div>
           <div>

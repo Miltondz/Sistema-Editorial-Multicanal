@@ -121,7 +121,7 @@ export const generateVariant = action({
 
     const creatorsText = item.creators?.length
       ? item.creators.map((c: any) => `${c.name} (${c.role})`).join(', ')
-      : 'unknown'
+      : 'not listed in database — research from your training knowledge'
 
     const reprTags = item.representationTags?.join(', ') || 'not specified'
     const themeTags = item.themeTags?.join(', ') || ''
@@ -166,7 +166,9 @@ Structure: MAX 3 <p> blocks total. No exceptions.
 
 CREATOR RESEARCH — use your training knowledge:
   - If "Creators listed" above contains names, expand on those specific people: their nationality, background, notable other works, awards (Eisner, Harvey, Ringo, Hugo, GLYPH, etc.) if you know them.
-  - If creators are unknown from the input, attempt to identify the writer/artist for this specific title from your knowledge — name them only if you are CONFIDENT. If uncertain, omit rather than guess.
+  - If creators are not listed, ACTIVELY research: name the writer and lead artist for this specific title from your training knowledge. Be specific — first name, last name.
+  - Name them ONLY if you are CONFIDENT. If uncertain about a specific person, omit them rather than guess.
+  - If you cannot confidently identify ANY creator, OMIT paragraph 3 entirely — do NOT write any sentence about creators being unknown, unlisted, or unavailable.
   - DO NOT invent credits, awards, or biographical facts you are not confident about.
 
 HTML rules:
@@ -177,9 +179,10 @@ HTML rules:
 - Tone: curatorial, warm, knowledgeable — NOT activist-lecture, NOT preachy
 
 BANNED PHRASES (do not use, in any form):
-must-read, a must, instant classic, essential reading, you need to read, perfect for fans of, don't miss, highly recommended, stunning, groundbreaking, amazing, incredible (without specific evidence), powerful story (without explaining why), diverse, diversity, minority
+must-read, a must, instant classic, essential reading, you need to read, perfect for fans of, don't miss, highly recommended, stunning, groundbreaking, amazing, incredible (without specific evidence), powerful story (without explaining why), diverse, diversity, minority, creators are unknown, creators are not listed, creators are currently unknown, credits are unavailable, writer is unknown, artist is unknown
 
 DO NOT use more than 3 <p> blocks. Trim ruthlessly — 1–2 tight paragraphs with real info beats 3 with filler.
+NEVER write a paragraph just to say creators are unknown. Either name them or skip the paragraph.
 
 ═══ CTATEXT (Tumblr tags) ═══
 Comma-separated tag names (NO # prefix). Include: character names, creator surnames, publisher, identity terms, title keywords, franchise, awards if applicable. 8–15 tags, most specific first.
@@ -212,7 +215,8 @@ headline — same title format as Tumblr:
 
 bodyText — 1 sentence ONLY, max 150 chars, plain text:
   - Most specific representation angle first: "Black queer protagonist", "written by a Puerto Rican author"
-  - Do NOT use: diverse, diversity, minority, must-read, amazing, incredible, stunning
+  - If creators are known/researchable, include: "written by [Name]" or "art by [Name]"
+  - Do NOT use: diverse, diversity, minority, must-read, amazing, incredible, stunning, creators unknown
   - No hashtags, no links, no HTML
 
 ctaText — ALWAYS return the exact string: "linktr.ee/HeroesInColor"
