@@ -75,37 +75,58 @@ export const list = query({
     needsReview: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    const applySecondary = (base: any, usedFields: string[]) => {
+      let q = base
+      if (!usedFields.includes('status') && args.status)
+        q = q.filter((f: any) => f.eq(f.field('status'), args.status!))
+      if (!usedFields.includes('contentType') && args.contentType)
+        q = q.filter((f: any) => f.eq(f.field('contentType'), args.contentType!))
+      if (!usedFields.includes('contentOrigin') && args.contentOrigin)
+        q = q.filter((f: any) => f.eq(f.field('contentOrigin'), args.contentOrigin!))
+      if (args.sourcePlatform)
+        q = q.filter((f: any) => f.eq(f.field('sourcePlatform'), args.sourcePlatform!))
+      if (args.enrichedManually !== undefined)
+        q = q.filter((f: any) => f.eq(f.field('enrichedManually'), args.enrichedManually!))
+      if (args.needsReview !== undefined)
+        q = q.filter((f: any) => f.eq(f.field('needsReview'), args.needsReview!))
+      return q
+    }
+
     if (args.search && args.search.trim().length > 0) {
-      return await ctx.db
+      const base = ctx.db
         .query('contentItems')
         .withSearchIndex('search_title', (q: any) => q.search('title', args.search!))
-        .paginate(args.paginationOpts)
+      return await applySecondary(base, []).paginate(args.paginationOpts)
     }
 
-    // Pick primary index
+    // Pick primary index, then apply remaining filters
     if (args.contentOrigin) {
-      return await ctx.db
-        .query('contentItems')
-        .withIndex('by_origin', (q: any) => q.eq('contentOrigin', args.contentOrigin!))
-        .paginate(args.paginationOpts)
+      const base = ctx.db.query('contentItems').withIndex('by_origin', (q: any) => q.eq('contentOrigin', args.contentOrigin!))
+      return await applySecondary(base, ['contentOrigin']).paginate(args.paginationOpts)
     }
     if (args.status) {
-      return await ctx.db
-        .query('contentItems')
-        .withIndex('by_status', (q: any) => q.eq('status', args.status!))
-        .paginate(args.paginationOpts)
+      const base = ctx.db.query('contentItems').withIndex('by_status', (q: any) => q.eq('status', args.status!))
+      return await applySecondary(base, ['status']).paginate(args.paginationOpts)
     }
     if (args.contentType) {
-      return await ctx.db
-        .query('contentItems')
-        .withIndex('by_content_type', (q: any) => q.eq('contentType', args.contentType!))
-        .paginate(args.paginationOpts)
+      const base = ctx.db.query('contentItems').withIndex('by_content_type', (q: any) => q.eq('contentType', args.contentType!))
+      return await applySecondary(base, ['contentType']).paginate(args.paginationOpts)
     }
 
-    return await ctx.db
+    const base = ctx.db.query('contentItems').order('desc')
+    return await applySecondary(base, []).paginate(args.paginationOpts)
+  },
+})
+
+export const searchForDuplicates = query({
+  args: { title: v.string() },
+  handler: async (ctx, args) => {
+    if (args.title.trim().length < 3) return []
+    const results = await ctx.db
       .query('contentItems')
-      .order('desc')
-      .paginate(args.paginationOpts)
+      .withSearchIndex('search_title', (q: any) => q.search('title', args.title))
+      .take(10)
+    return results.map(r => ({ _id: r._id as string, title: r.title, status: r.status }))
   },
 })
 
@@ -648,12 +669,14 @@ export const deleteItem = mutation({
       .collect()
     for (const s of scores) await ctx.db.delete(s._id)
 
-    // Delete media asset records (storage blobs remain — manual cleanup if needed)
     const assets = await ctx.db
       .query('mediaAssets')
       .withIndex('by_item', q => q.eq('contentItemId', args.id))
       .collect()
-    for (const a of assets) await ctx.db.delete(a._id)
+    for (const a of assets) {
+      try { await ctx.storage.delete(a.storageId) } catch (_) {}
+      await ctx.db.delete(a._id)
+    }
 
     await ctx.db.delete(args.id)
 
@@ -691,7 +714,10 @@ export const bulkDeleteByImportJob = mutation({
       const scores = await ctx.db.query('channelScores').withIndex('by_item', q => q.eq('contentItemId', item._id)).collect()
       for (const s of scores) await ctx.db.delete(s._id)
       const assets = await ctx.db.query('mediaAssets').withIndex('by_item', q => q.eq('contentItemId', item._id)).collect()
-      for (const a of assets) await ctx.db.delete(a._id)
+      for (const a of assets) {
+        try { await ctx.storage.delete(a.storageId) } catch (_) {}
+        await ctx.db.delete(a._id)
+      }
       await ctx.db.delete(item._id)
       deleted++
     }
@@ -742,7 +768,10 @@ export const bulkDeleteItems = mutation({
         .query('mediaAssets')
         .withIndex('by_item', q => q.eq('contentItemId', id))
         .collect()
-      for (const a of assets) await ctx.db.delete(a._id)
+      for (const a of assets) {
+        try { await ctx.storage.delete(a.storageId) } catch (_) {}
+        await ctx.db.delete(a._id)
+      }
 
       await ctx.db.delete(id)
       await ctx.runMutation(internal.auditEvents.log, {
@@ -905,29 +934,27 @@ export const getDashboardSparklines = query({
     })
     const nextDay = (ts: number) => ts + 86400000
 
-    const pubLogs = await ctx.db
-      .query('publicationLog')
-      .withIndex('by_status', q => q.eq('publishStatus', 'success'))
-      .order('desc')
-      .take(500)
+    const [pubLogs, approvalEvents, createdEvents] = await Promise.all([
+      ctx.db.query('publicationLog')
+        .withIndex('by_status', q => q.eq('publishStatus', 'success'))
+        .order('desc').take(500),
+      ctx.db.query('auditEvents')
+        .withIndex('by_event_type', q => q.eq('eventType', 'item.approved'))
+        .order('desc').take(500),
+      ctx.db.query('auditEvents')
+        .withIndex('by_event_type', q => q.eq('eventType', 'item.created'))
+        .order('desc').take(500),
+    ])
 
     const published = days.map(dayStart =>
       pubLogs.filter(l => l._creationTime >= dayStart && l._creationTime < nextDay(dayStart)).length
     )
     const approved = days.map(dayStart =>
-      pubLogs.filter(l =>
-        l._creationTime >= dayStart &&
-        l._creationTime < nextDay(dayStart) &&
-        l.channel === 'tumblr'
-      ).length
+      approvalEvents.filter(e => e._creationTime >= dayStart && e._creationTime < nextDay(dayStart)).length
     )
-
-    const reviewItems = await ctx.db
-      .query('contentItems')
-      .withIndex('by_needs_review', q => q.eq('needsReview', true))
-      .collect()
-    const reviewCount = reviewItems.length
-    const review = days.map(() => reviewCount)
+    const review = days.map(dayStart =>
+      createdEvents.filter(e => e._creationTime >= dayStart && e._creationTime < nextDay(dayStart)).length
+    )
 
     return { review, approved, published }
   },

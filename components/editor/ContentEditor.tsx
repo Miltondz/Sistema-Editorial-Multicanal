@@ -1,7 +1,8 @@
 'use client'
-import { useState, useRef } from 'react'
-import { useMutation, useAction } from 'convex/react'
+import { useState, useRef, useEffect } from 'react'
+import { useMutation, useAction, useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import { findDuplicateCandidates } from '@/lib/quality/similarity'
 import { OriginBadge } from '@/components/catalog/OriginBadge'
 import { VariantPanel } from '@/components/editor/VariantPanel'
 import { ResearchAssistant } from '@/components/editor/ResearchAssistant'
@@ -69,6 +70,16 @@ const EVERGREEN_OPTIONS: { value: EvergreenClass; label: string }[] = [
 
 // ── MediaUploader ────────────────────────────────────────────────────────────
 
+function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file)
+    const img = new window.Image()
+    img.onload = () => { URL.revokeObjectURL(url); resolve({ width: img.naturalWidth, height: img.naturalHeight }) }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve({ width: 0, height: 0 }) }
+    img.src = url
+  })
+}
+
 function MediaUploader({
   contentItemId,
   media,
@@ -82,8 +93,11 @@ function MediaUploader({
   const saveMediaAsset = useMutation(api.mediaAssets.saveMediaAsset)
   const deleteAsset = useMutation(api.mediaAssets.deleteAsset)
   const setPrimary = useMutation(api.mediaAssets.setPrimary)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updateAltText = useMutation((api.mediaAssets as any).updateAltText)
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [altEditing, setAltEditing] = useState<Record<string, string>>({})
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -94,7 +108,10 @@ function MediaUploader({
     }
     setUploading(true)
     try {
-      const uploadUrl = await generateUploadUrl()
+      const [uploadUrl, dims] = await Promise.all([
+        generateUploadUrl(),
+        getImageDimensions(file),
+      ])
       const res = await fetch(uploadUrl, {
         method: 'POST',
         headers: { 'Content-Type': file.type },
@@ -106,6 +123,8 @@ function MediaUploader({
         storageId,
         mimeType: file.type,
         fileSizeBytes: file.size,
+        width:  dims.width  || undefined,
+        height: dims.height || undefined,
       })
       onUploaded()
     } catch (err) {
@@ -116,42 +135,78 @@ function MediaUploader({
     }
   }
 
+  async function handleAltSave(assetId: string) {
+    const val = altEditing[assetId]
+    if (val === undefined) return
+    await updateAltText({ id: assetId as any, altText: val })
+    setAltEditing(prev => { const n = { ...prev }; delete n[assetId]; return n })
+  }
+
   return (
     <div>
       <div className="flex flex-wrap gap-3 mb-3">
         {media.map(asset => (
-          <div key={asset._id} className="relative group">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={asset.publicUrl}
-              alt={asset.altText ?? ''}
-              className={`w-24 h-24 object-cover rounded border-2 ${
-                asset.isPrimary ? 'border-indigo-500' : 'border-gray-200'
-              }`}
-            />
-            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded flex items-center justify-center gap-1 transition-opacity">
-              {!asset.isPrimary && (
+          <div key={asset._id} className="flex-shrink-0 w-32">
+            <div className="relative group mb-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={asset.publicUrl}
+                alt={asset.altText ?? ''}
+                className={`w-32 h-24 object-cover rounded border-2 ${
+                  asset.isPrimary ? 'border-indigo-500' : 'border-gray-200'
+                }`}
+              />
+              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 rounded flex items-center justify-center gap-1 transition-opacity">
+                {!asset.isPrimary && (
+                  <button
+                    onClick={() => setPrimary({ id: asset._id, contentItemId })}
+                    className="text-xs text-white bg-indigo-600 px-1.5 py-0.5 rounded"
+                    title="Marcar como principal"
+                  >
+                    ★
+                  </button>
+                )}
                 <button
-                  onClick={() => setPrimary({ id: asset._id, contentItemId })}
-                  className="text-xs text-white bg-indigo-600 px-1.5 py-0.5 rounded"
-                  title="Marcar como principal"
+                  onClick={() => {
+                    if (confirm('¿Eliminar imagen?')) deleteAsset({ id: asset._id })
+                  }}
+                  className="text-xs text-white bg-red-600 px-1.5 py-0.5 rounded"
                 >
-                  ★
+                  ✕
                 </button>
+              </div>
+              {asset.isPrimary && (
+                <span className="absolute bottom-0 left-0 right-0 text-center text-xs bg-indigo-600 text-white rounded-b py-0.5">
+                  Principal
+                </span>
               )}
-              <button
-                onClick={() => {
-                  if (confirm('¿Eliminar imagen?')) deleteAsset({ id: asset._id })
-                }}
-                className="text-xs text-white bg-red-600 px-1.5 py-0.5 rounded"
-              >
-                ✕
-              </button>
             </div>
-            {asset.isPrimary && (
-              <span className="absolute bottom-0 left-0 right-0 text-center text-xs bg-indigo-600 text-white rounded-b py-0.5">
-                Principal
-              </span>
+            {/* Dimensions */}
+            {(asset.width && asset.height) ? (
+              <p className="text-[10px] text-gray-400 text-center mb-0.5">{asset.width}×{asset.height}px</p>
+            ) : null}
+            {/* Alt text inline edit */}
+            {altEditing[asset._id] !== undefined ? (
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  value={altEditing[asset._id]}
+                  onChange={e => setAltEditing(prev => ({ ...prev, [asset._id]: e.target.value }))}
+                  onKeyDown={e => e.key === 'Enter' && handleAltSave(asset._id)}
+                  placeholder="Alt text"
+                  className="flex-1 text-[10px] px-1 py-0.5 border border-gray-300 rounded min-w-0"
+                  autoFocus
+                />
+                <button onClick={() => handleAltSave(asset._id)} className="text-[10px] text-green-600 font-medium">✓</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAltEditing(prev => ({ ...prev, [asset._id]: asset.altText ?? '' }))}
+                className="w-full text-[10px] text-gray-400 hover:text-indigo-600 text-left truncate"
+                title={asset.altText ?? 'Añadir alt text'}
+              >
+                {asset.altText ? asset.altText : '+ alt text'}
+              </button>
             )}
           </div>
         ))}
@@ -235,6 +290,37 @@ function CreatorsEditor({
 }
 
 // ── Main ContentEditor ────────────────────────────────────────────────────────
+
+function DuplicateDetector({ title }: { title: string }) {
+  const [debouncedTitle, setDebouncedTitle] = useState(title)
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTitle(title), 600)
+    return () => clearTimeout(t)
+  }, [title])
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const results = useQuery((api.contentItems as any).searchForDuplicates,
+    debouncedTitle.trim().length >= 3 ? { title: debouncedTitle.trim() } : 'skip'
+  ) as Array<{ _id: string; title: string; status: string }> | undefined
+
+  const candidates = results
+    ? findDuplicateCandidates(debouncedTitle, results.map(r => ({ id: r._id, title: r.title })))
+    : []
+
+  if (candidates.length === 0) return null
+
+  return (
+    <div className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
+      <p className="text-xs font-medium text-amber-800 mb-1">Posibles duplicados:</p>
+      {candidates.map(c => (
+        <a key={c.id} href={`/catalog/${c.id}`} target="_blank" rel="noopener noreferrer"
+          className="block text-xs text-amber-700 hover:underline truncate">
+          · {c.title} <span className="text-amber-400">({Math.round(c.similarity * 100)}% similar)</span>
+        </a>
+      ))}
+    </div>
+  )
+}
 
 interface ContentEditorProps {
   mode: 'create' | 'edit'
@@ -600,6 +686,9 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
             className={INPUT_CLASS}
             placeholder="Título del ítem"
           />
+          {mode === 'create' && form.title.trim().length >= 3 && (
+            <DuplicateDetector title={form.title} />
+          )}
         </Field>
 
         <div className="grid grid-cols-2 gap-4">

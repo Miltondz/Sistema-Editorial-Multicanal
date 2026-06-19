@@ -1,21 +1,12 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { usePaginatedQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { CatalogTable } from '@/components/catalog/CatalogTable'
 import { CatalogFilters, FilterState } from '@/components/catalog/CatalogFilters'
 import type { ContentItem } from '@/lib/types/domain'
-
-const INITIAL_FILTERS: FilterState = {
-  search: '',
-  status: '',
-  contentType: '',
-  contentOrigin: '',
-  sourcePlatform: '',
-  enrichedManually: undefined,
-  needsReview: undefined,
-}
 
 type BulkAction = 'approve' | 'evergreen_high' | 'evergreen_low' | 'priority_5' | 'mark_enriched' | 'delete'
 
@@ -29,7 +20,16 @@ const BULK_ACTIONS: { value: BulkAction; label: string; danger?: boolean }[] = [
 ]
 
 export default function CatalogPage() {
-  const [filters, setFilters]         = useState<FilterState>(INITIAL_FILTERS)
+  const searchParams = useSearchParams()
+  const [filters, setFilters] = useState<FilterState>({
+    search:           searchParams.get('search') ?? '',
+    status:           '',
+    contentType:      '',
+    contentOrigin:    '',
+    sourcePlatform:   '',
+    enrichedManually: undefined,
+    needsReview:      undefined,
+  })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkLoading, setBulkLoading] = useState(false)
   const [bulkResult,  setBulkResult]  = useState<string | null>(null)

@@ -62,14 +62,14 @@ export const listByDateRangeWithItems = query({
       slots.push(...daySlots)
     }
 
-    const enriched = []
-    for (const slot of slots) {
-      if (!slot.contentItemId) {
-        enriched.push({ ...slot, item: null })
-        continue
-      }
-      const item = await ctx.db.get(slot.contentItemId)
-      enriched.push({
+    const itemIds = [...new Set(slots.map(s => s.contentItemId).filter((id): id is NonNullable<typeof id> => !!id))]
+    const itemDocs = await Promise.all(itemIds.map(id => ctx.db.get(id)))
+    const itemMap = new Map(itemDocs.filter(Boolean).map(doc => [doc!._id as string, doc!]))
+
+    const enriched = slots.map(slot => {
+      if (!slot.contentItemId) return { ...slot, item: null }
+      const item = itemMap.get(slot.contentItemId as string)
+      return {
         ...slot,
         item: item
           ? {
@@ -81,8 +81,8 @@ export const listByDateRangeWithItems = query({
               sourcePlatform: item.sourcePlatform,
             }
           : null,
-      })
-    }
+      }
+    })
 
     return enriched
   },
@@ -380,6 +380,64 @@ export const createManual = mutation({
     })
 
     return id
+  },
+})
+
+// ── createFromSpecialDate — create a planner slot tied to a special date ────
+
+export const createFromSpecialDate = mutation({
+  args: {
+    specialDateId:  v.id('specialDates'),
+    channel:        channelV,
+    dayPart:        dayPartV,
+    contentItemId:  v.optional(v.id('contentItems')),
+  },
+  handler: async (ctx, args): Promise<{ slotId: string; scheduledFor: string }> => {
+    const sd = await ctx.db.get(args.specialDateId)
+    if (!sd) throw new Error('Fecha especial no encontrada')
+
+    // Resolve slot date from special date
+    let scheduledFor: string
+    if (sd.dateType === 'one_time') {
+      // one_time dates store full date or YYYY-MM-DD
+      scheduledFor = sd.date.length > 5 ? sd.date : `${new Date().getFullYear()}-${sd.date}`
+    } else {
+      // anniversary: MM-DD → next occurrence (this year or next if already passed)
+      const [mm, dd] = sd.date.split('-')
+      const now = new Date()
+      const thisYear = now.getUTCFullYear()
+      const candidate = new Date(Date.UTC(thisYear, parseInt(mm) - 1, parseInt(dd)))
+      if (candidate.getTime() < now.setUTCHours(0, 0, 0, 0)) {
+        candidate.setUTCFullYear(thisYear + 1)
+      }
+      scheduledFor = candidate.toISOString().slice(0, 10)
+    }
+
+    const slotId = await ctx.db.insert('scheduleSlots', {
+      scheduledFor,
+      dayPart:       args.dayPart,
+      channel:       args.channel,
+      contentItemId: args.contentItemId,
+      contentMode:   'new',
+      priority:      0,
+      locked:        false,
+      status:        args.contentItemId ? 'planned' : 'empty',
+    })
+
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'scheduleSlot',
+      entityId:   slotId,
+      eventType:  'slot.created_from_special_date',
+      payloadJson: {
+        specialDateId: args.specialDateId,
+        specialDateTitle: sd.title,
+        channel: args.channel,
+        scheduledFor,
+        contentItemId: args.contentItemId,
+      },
+    })
+
+    return { slotId: slotId as string, scheduledFor }
   },
 })
 

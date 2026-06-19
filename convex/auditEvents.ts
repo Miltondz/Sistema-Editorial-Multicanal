@@ -1,5 +1,22 @@
-import { internalMutation } from './_generated/server'
+import { query, internalMutation } from './_generated/server'
 import { v } from 'convex/values'
+
+export const listByEntity = query({
+  args: {
+    entityType: v.string(),
+    entityId:   v.string(),
+    limit:      v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query('auditEvents')
+      .withIndex('by_entity', q =>
+        q.eq('entityType', args.entityType).eq('entityId', args.entityId)
+      )
+      .order('desc')
+      .take(args.limit ?? 50)
+  },
+})
 
 export const log = internalMutation({
   args: {

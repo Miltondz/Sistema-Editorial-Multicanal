@@ -6,6 +6,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { publishPost, selectPostType } from '../../lib/integrations/tumblr'
 import { publishTweet } from '../../lib/integrations/x'
+import { TUMBLR_FOOTER, buildFullTumblrCaption, stripHtml, assembleXTweet } from '../../lib/preview/payloads'
 
 // ── Local type hints (resolved after `npx convex dev`) ────────────────────
 
@@ -33,17 +34,6 @@ const MAX_RETRIES = 3
 const RETRY_BACKOFF_MS = [5_000, 15_000, 30_000] as const
 
 // ── Payload builders ──────────────────────────────────────────────────────
-
-// Hardcoded footer appended to every Tumblr post caption
-const TUMBLR_FOOTER = '<p>[SuperheroesInColor&nbsp;<b><a href="https://linktr.ee/HeroesInColor">linktr.ee</a></b>&nbsp;/&nbsp;<a href="https://www.facebook.com/superheroesincolor/">FB</a>&nbsp;/ IG/&nbsp;<a href="https://twitter.com/HeroesInColor00"><b>Twitter</b></a>&nbsp;/&nbsp;<a href="https://www.twitch.tv/superheroesincolor">Twitch</a>&nbsp;/&nbsp;<b><a href="https://www.paypal.me/heroesincolor?locale.x=en_US">Support</a></b>]</p>'
-
-function buildFullTumblrCaption(headline: string, bodyText: string): string {
-  return [`<h2>${headline}</h2>`, bodyText, TUMBLR_FOOTER].filter(Boolean).join('\n')
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()
-}
 
 function buildTumblrPayload(
   variant: { headline?: string; bodyText?: string; ctaText?: string },
@@ -93,22 +83,7 @@ function buildXPayload(
   _item: { buyLink?: string },
   mediaAssets: Array<{ publicUrl: string }>
 ) {
-  const headline = stripHtml(variant.headline ?? '').trim()
-  const cta      = 'linktr.ee/HeroesInColor'  // always fixed — enforced in ai.ts too
-  let   body     = stripHtml(variant.bodyText ?? '').trim()
-
-  // Assemble: headline + body + cta, each separated by blank line
-  // Total budget: 280 chars. Overhead = headline + 2×"\n\n" (4) + cta = fixed
-  const overhead = headline.length + 4 + cta.length
-  const maxBody  = Math.max(0, 280 - overhead - 4) // extra 4 for safety
-
-  if (body.length > maxBody) {
-    body = body.slice(0, maxBody - 3) + '...'
-  }
-
-  const parts = [headline, body, cta].filter(Boolean)
-  const text  = parts.join('\n\n')
-
+  const { text } = assembleXTweet(variant)
   return {
     text,
     imageUrls: mediaAssets.map(a => a.publicUrl).slice(0, 4),
@@ -272,6 +247,30 @@ export const publishDirect = action({
       publicationLogId: logId,
       error: result.errorMessage,
     }
+  },
+})
+
+// ── retryFailedSlot — public action called from planner UI ─────────────────
+
+export const retryFailedSlot = action({
+  args: { slotId: v.id('scheduleSlots') },
+  handler: async (ctx, args): Promise<{ queued: boolean; error?: string }> => {
+    const slot = await ctx.runQuery(internal.scheduleSlots.getByIdInternal, { id: args.slotId }) as any | null
+    if (!slot) return { queued: false, error: 'Slot no encontrado' }
+    if (slot.status !== 'failed') return { queued: false, error: `Slot no está en estado fallido (estado actual: ${slot.status})` }
+
+    await ctx.runMutation(internal.scheduleSlots.updateStatusInternal, {
+      id: args.slotId, status: 'ready',
+    })
+    await ctx.scheduler.runAfter(0, internal.actions.publisher.publishSlot, {
+      slotId: args.slotId, retryCount: 0,
+    })
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'scheduleSlot', entityId: args.slotId,
+      eventType: 'slot.retry_queued',
+      payloadJson: { slotId: args.slotId },
+    })
+    return { queued: true }
   },
 })
 

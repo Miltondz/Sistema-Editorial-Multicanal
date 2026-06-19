@@ -22,6 +22,7 @@ export default function AnalyticsPage() {
     const byDayPart: Record<string, number> = {}
     let newCount = 0
     let recycledCount = 0
+    let totalLikes = 0, totalReposts = 0, totalImpressions = 0, totalEngagements = 0, metricsCount = 0
 
     for (const log of logs) {
       if (log.contentType)   byType[log.contentType]     = (byType[log.contentType]     ?? 0) + 1
@@ -29,12 +30,31 @@ export default function AnalyticsPage() {
       if (log.dayPart)       byDayPart[log.dayPart]      = (byDayPart[log.dayPart]      ?? 0) + 1
       if (log.contentMode === 'new')      newCount++
       if (log.contentMode === 'recycled') recycledCount++
+      const hasMetrics = log.likes > 0 || log.reposts > 0 || log.reblogs > 0 || log.impressions > 0 || log.engagements > 0
+      if (hasMetrics) {
+        totalLikes       += log.likes       ?? 0
+        totalReposts     += (log.reposts    ?? 0) + (log.reblogs ?? 0)
+        totalImpressions += log.impressions ?? 0
+        totalEngagements += log.engagements ?? 0
+        metricsCount++
+      }
     }
 
     const enrichedCount    = logs.filter(l => l.enrichedManually === true).length
     const notEnrichedCount = logs.filter(l => l.enrichedManually === false).length
+    const avgEngagementRate = metricsCount > 0 && totalImpressions > 0
+      ? ((totalEngagements / totalImpressions) * 100).toFixed(1)
+      : null
 
-    return { byType, byOrigin, byDayPart, newCount, recycledCount, enrichedCount, notEnrichedCount, total: logs.length }
+    const topPosts = [...logs]
+      .filter(l => (l.engagements ?? 0) > 0)
+      .sort((a, b) => (b.engagements ?? 0) - (a.engagements ?? 0))
+      .slice(0, 5)
+
+    return {
+      byType, byOrigin, byDayPart, newCount, recycledCount, enrichedCount, notEnrichedCount, total: logs.length,
+      performance: { totalLikes, totalReposts, totalImpressions, totalEngagements, metricsCount, avgEngagementRate, topPosts },
+    }
   }, [logs])
 
   return (
@@ -98,6 +118,50 @@ export default function AnalyticsPage() {
             <BarRow label="Enriquecido"    count={stats.enrichedCount}    total={stats.total} color="bg-teal-500" />
             <BarRow label="Sin enriquecer" count={stats.notEnrichedCount} total={stats.total} color="bg-gray-300" />
           </ChartCard>
+
+          {/* Performance metrics — only shown when engagement data exists */}
+          {stats.performance.metricsCount > 0 ? (
+            <ChartCard title={`Métricas de rendimiento (${stats.performance.metricsCount} publicaciones con datos)`}>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                {[
+                  { label: 'Impresiones', value: stats.performance.totalImpressions.toLocaleString() },
+                  { label: 'Engagements', value: stats.performance.totalEngagements.toLocaleString() },
+                  { label: 'Likes', value: stats.performance.totalLikes.toLocaleString() },
+                  { label: 'Reposts/Reblogs', value: stats.performance.totalReposts.toLocaleString() },
+                ].map(m => (
+                  <div key={m.label} className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                    <p className="text-lg font-bold text-gray-900">{m.value}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{m.label}</p>
+                  </div>
+                ))}
+              </div>
+              {stats.performance.avgEngagementRate && (
+                <p className="text-xs text-gray-600 text-center mb-3">
+                  Tasa de engagement promedio: <strong>{stats.performance.avgEngagementRate}%</strong>
+                </p>
+              )}
+              {stats.performance.topPosts.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Top publicaciones</p>
+                  {stats.performance.topPosts.map((p: any) => (
+                    <div key={p._id} className="flex items-center justify-between text-xs py-1.5 border-b border-gray-100 last:border-0">
+                      <a href={p.externalPostUrl} target="_blank" rel="noopener noreferrer"
+                        className="text-indigo-600 hover:underline truncate max-w-[60%]">
+                        {p.externalPostUrl ?? p._id}
+                      </a>
+                      <span className="text-gray-500 ml-2 flex-shrink-0">{p.engagements} eng · {p.channel}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ChartCard>
+          ) : (
+            <ChartCard title="Métricas de rendimiento">
+              <p className="text-xs text-gray-400 py-4 text-center">
+                Sin datos de engagement aún. Se poblarán cuando se sincronicen métricas desde las plataformas.
+              </p>
+            </ChartCard>
+          )}
         </div>
       )}
     </div>

@@ -6,6 +6,8 @@ import type { Id } from '@/convex/_generated/dataModel'
 import type { Channel, VariantStatus } from '@/lib/types/domain'
 import { RichTextEditor } from './RichTextEditor'
 import { AILoadingSpinner } from '@/components/ui/AILoadingSpinner'
+import { assembleXTweet, buildFullTumblrCaption } from '@/lib/preview/payloads'
+import { lintVariant } from '@/lib/quality/variantLint'
 
 const STATUS_LABELS: Record<VariantStatus, string> = {
   not_started: 'Sin empezar',
@@ -69,6 +71,14 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
   const [publishResult, setPublishResult] = useState<{ url?: string; error?: string } | null>(null)
   // 'preview' = rendered HTML (Tumblr only); 'code' = raw text
   const [bodyPreviewMode, setBodyPreviewMode] = useState<'preview' | 'code'>('preview')
+
+  // X: exact assembled tweet length using same logic as publisher
+  const xAssembly = channel === 'x' ? assembleXTweet(editing ? form : (activeVariant ?? {})) : null
+  const xAssembledLen = xAssembly?.length ?? 0
+  const X_LIMIT = 280
+
+  // Lint warnings for current variant (non-editing, show on preview)
+  const lintWarnings = !editing && activeVariant ? lintVariant(activeVariant) : []
 
   const channelLabel = channel === 'tumblr' ? 'Tumblr' : 'X / Twitter'
   const status       = activeVariant?.status as VariantStatus | undefined
@@ -154,7 +164,16 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
     <div className="border border-gray-200 rounded-lg p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h4 className="font-medium text-gray-900 text-sm">{channelLabel}</h4>
+        <div className="flex items-center gap-2">
+          <h4 className="font-medium text-gray-900 text-sm">{channelLabel}</h4>
+          {channel === 'x' && activeVariant && (
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+              xAssembledLen > X_LIMIT ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'
+            }`}>
+              {xAssembledLen}/{X_LIMIT}
+            </span>
+          )}
+        </div>
         {status ? (
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[status]}`}>
             {STATUS_LABELS[status]}
@@ -213,7 +232,11 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
               {channel === 'tumblr' && bodyPreviewMode === 'preview' ? (
                 <div
                   className="prose prose-sm max-w-none text-gray-800 [&_h2]:text-base [&_h2]:font-bold [&_p]:my-1 [&_a]:text-indigo-600 [&_a]:underline"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(activeVariant.bodyText) }}
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeHtml(
+                      buildFullTumblrCaption(activeVariant.headline ?? '', activeVariant.bodyText ?? '')
+                    ),
+                  }}
                 />
               ) : (
                 <p className="whitespace-pre-wrap text-xs text-gray-700 font-mono leading-relaxed">
@@ -252,7 +275,7 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
-              Cuerpo {channel === 'x' ? '(máx 150 caracteres, texto plano)' : '(editor de texto enriquecido)'}
+              Cuerpo {channel === 'x' ? '(texto plano)' : '(editor de texto enriquecido)'}
             </label>
             {channel === 'tumblr' ? (
               <RichTextEditor
@@ -264,13 +287,14 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
                 <textarea
                   value={form.bodyText}
                   onChange={e => setForm(f => ({ ...f, bodyText: e.target.value }))}
-                  maxLength={150}
                   rows={3}
                   className={`${INPUT_CLASS} font-mono text-xs`}
                 />
-                <p className="text-xs text-gray-400 mt-0.5 text-right">
-                  {form.bodyText.length}/150
-                </p>
+                <div className="flex justify-between mt-0.5">
+                  <span className={`text-xs ${xAssembledLen > X_LIMIT ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
+                    Tweet ensamblado: {xAssembledLen}/{X_LIMIT} chars
+                  </span>
+                </div>
               </>
             )}
           </div>
@@ -301,6 +325,28 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
               Cancelar
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Lint warnings */}
+      {lintWarnings.length > 0 && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 space-y-1">
+          {lintWarnings.map((w, i) => (
+            <p key={i} className="text-xs text-amber-700">
+              <span className="font-medium">{w.rule}</span> en {w.field}: &ldquo;{w.match}&rdquo;
+            </p>
+          ))}
+        </div>
+      )}
+
+      {/* X tweet preview (not editing) */}
+      {channel === 'x' && xAssembly && !editing && (
+        <div className="bg-gray-50 rounded px-3 py-2">
+          <span className="text-xs font-semibold text-gray-500 block mb-1">TWEET ENSAMBLADO</span>
+          <p className="text-xs text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">{xAssembly.text}</p>
+          {xAssembly.truncated && (
+            <p className="text-xs text-amber-600 mt-1">⚠ Texto truncado para caber en 280 chars</p>
+          )}
         </div>
       )}
 
@@ -394,6 +440,25 @@ interface VariantPanelProps {
 export function VariantPanel({ contentItemId, itemStatus }: VariantPanelProps) {
   const logs     = useQuery(api.publicationLog.listByItem, { contentItemId })
   const variants = useQuery(api.contentVariants.listByItem, { contentItemId })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const generateVariantBoth = useAction(api.actions.ai.generateVariant as any)
+  const [generatingBoth, setGeneratingBoth] = useState(false)
+  const [bothError, setBothError]           = useState<string | null>(null)
+
+  async function handleGenerateBoth() {
+    setGeneratingBoth(true)
+    setBothError(null)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await generateVariantBoth({ contentItemId, channel: 'tumblr' } as any)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await generateVariantBoth({ contentItemId, channel: 'x' } as any)
+    } catch (err) {
+      setBothError(err instanceof Error ? err.message : 'Error generando variantes')
+    } finally {
+      setGeneratingBoth(false)
+    }
+  }
 
   const approvedChannels = new Set(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -406,6 +471,23 @@ export function VariantPanel({ contentItemId, itemStatus }: VariantPanelProps) {
 
   return (
     <div className="space-y-6">
+      {/* Generate both variants at once */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={handleGenerateBoth}
+          disabled={generatingBoth}
+          className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2"
+        >
+          {generatingBoth ? (
+            <><span className="animate-spin inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full" />Generando…</>
+          ) : (
+            '✦ Generar ambas variantes'
+          )}
+        </button>
+        {bothError && <span className="text-xs text-red-600">{bothError}</span>}
+      </div>
+
       {/* Warning: approved item but no approved variant */}
       {missingApproval && (
         <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg">

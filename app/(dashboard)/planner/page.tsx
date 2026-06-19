@@ -179,6 +179,8 @@ export default function PlannerPage() {
   const recomputeScores = useAction((api.actions as any).scoring.recomputeAllScores)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const publishDirect   = useAction(api.actions.publisher.publishDirect as any)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const retryFailedSlot = useAction((api.actions.publisher as any).retryFailedSlot)
 
   const [generating,    setGenerating]    = useState(false)
   const [genResult,     setGenResult]     = useState<{ slotsCreated: number; slotsSkipped: number } | null>(null)
@@ -256,6 +258,20 @@ export default function PlannerPage() {
       await assignSlot({ id: slot._id, contentItemId: undefined, variantId: undefined, status: 'empty' })
       setSelectedSlot(null)
       setActionMsg('Contenido desasignado.')
+    } catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function handleRetrySlot(slot: any) {
+    setActionMsg(null)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await retryFailedSlot({ slotId: slot._id } as any)
+      if ((result as any).queued) {
+        setActionMsg('Slot re-encolado para publicación.')
+      } else {
+        setActionMsg(`Error: ${(result as any).error ?? 'No se pudo re-encolar'}`)
+      }
     } catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
   }
 
@@ -474,6 +490,7 @@ export default function PlannerPage() {
           onToggleLock={() => { setLocked({ id: selectedSlot._id, locked: !selectedSlot.locked }); setSelectedSlot(null) }}
           onUnassign={() => handleUnassign(selectedSlot)}
           onDelete={() => handleDelete(selectedSlot)}
+          onRetry={() => handleRetrySlot(selectedSlot)}
           actionMsg={actionMsg}
         />
       )}
@@ -692,7 +709,7 @@ function SlotPill({
 // ── SlotDetailModal ───────────────────────────────────────────────────────────
 
 function SlotDetailModal({
-  slot, onClose, onPublishNow, onReschedule, onToggleLock, onUnassign, onDelete, actionMsg,
+  slot, onClose, onPublishNow, onReschedule, onToggleLock, onUnassign, onDelete, onRetry, actionMsg,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slot: any
@@ -702,6 +719,7 @@ function SlotDetailModal({
   onToggleLock: () => void
   onUnassign: () => void
   onDelete: () => void
+  onRetry: () => void
   actionMsg: string | null
 }) {
   const [newDate,    setNewDate]    = useState<string>(slot.scheduledFor)
@@ -814,6 +832,15 @@ function SlotDetailModal({
 
         {/* Actions */}
         <div className="flex flex-col gap-2">
+          {slot.status === 'failed' && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="w-full px-4 py-2 text-sm font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700"
+            >
+              ↺ Reintentar publicación
+            </button>
+          )}
           {canPublishNow && (
             <button
               type="button"

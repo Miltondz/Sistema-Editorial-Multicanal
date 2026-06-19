@@ -7,6 +7,7 @@ import { ContentEditor } from '@/components/editor/ContentEditor'
 import type { Id } from '@/convex/_generated/dataModel'
 import type { ContentItem, MediaAsset } from '@/lib/types/domain'
 import { useState } from 'react'
+import { AuditTimeline } from '@/components/editor/AuditTimeline'
 
 export default function EditItemPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -76,6 +77,23 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
         </button>
       </div>
 
+      {/* Score summary chips */}
+      {scores && scores.length > 0 && (
+        <div className="mb-4 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500">Scores:</span>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {(scores as any[]).map(s => {
+            const score = s.reuseScore ?? 0
+            const color = score >= 0.7 ? 'bg-green-100 text-green-700' : score >= 0.4 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+            return (
+              <span key={s._id} className={`text-xs px-2.5 py-1 rounded-full font-medium ${color}`}>
+                {s.channel === 'x' ? 'X' : 'Tumblr'}: {score.toFixed(2)}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
       {/* Cover image panel */}
       {coverImageUrl && <CoverImagePanel itemId={params.id} coverImageUrl={coverImageUrl} />}
 
@@ -85,6 +103,9 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
           initialItem={itemWithMedia}
         />
       </div>
+
+      {/* Audit timeline */}
+      <AuditTimeline entityType="contentItem" entityId={params.id} />
 
       {/* Score breakdown */}
       {scores && scores.length > 0 && (

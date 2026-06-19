@@ -198,6 +198,16 @@ export const setPrimary = mutation({
   },
 })
 
+export const updateAltText = mutation({
+  args: {
+    id: v.id('mediaAssets'),
+    altText: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { altText: args.altText })
+  },
+})
+
 export const listAll = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {

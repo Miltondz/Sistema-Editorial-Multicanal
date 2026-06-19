@@ -552,6 +552,9 @@ export default function SpecialDatesPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const searchImport = useAction((api.actions.specialDates as any).searchAndImport)
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const createFromSpecialDate = useMutation((api.scheduleSlots as any).createFromSpecialDate)
+
   const [tab,          setTab]          = useState<Tab>('upcoming')
   const [showForm,     setShowForm]     = useState(false)
   const [showSearch,   setShowSearch]   = useState(false)
@@ -563,6 +566,26 @@ export default function SpecialDatesPage() {
   const [searchError,  setSearchError]  = useState<string | null>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [editingDate,  setEditingDate]  = useState<any | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [schedulingDate, setSchedulingDate] = useState<any | null>(null)
+  const [schedChannel,   setSchedChannel]   = useState<'tumblr' | 'x'>('tumblr')
+  const [schedDayPart,   setSchedDayPart]   = useState<'morning' | 'afternoon' | 'evening'>('morning')
+  const [schedResult,    setSchedResult]    = useState<string | null>(null)
+  const [schedSaving,    setSchedSaving]    = useState(false)
+
+  async function handleSchedule(d: any) {
+    setSchedSaving(true)
+    setSchedResult(null)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await createFromSpecialDate({ specialDateId: d._id as any, channel: schedChannel, dayPart: schedDayPart })
+      setSchedResult(`Slot creado para ${(res as any).scheduledFor} · ${schedChannel}`)
+    } catch (err) {
+      setSchedResult(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSchedSaving(false)
+    }
+  }
 
   const delTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => () => { if (delTimerRef.current) clearTimeout(delTimerRef.current) }, [])
@@ -707,6 +730,12 @@ export default function SpecialDatesPage() {
               }`}
             >
               {generating === d._id ? '⏳' : `✦ ${hasIdeas ? 'Regenerar' : 'Generar ideas'}`}
+            </button>
+            <button
+              onClick={() => { setSchedulingDate(d); setSchedResult(null) }}
+              className="px-2.5 py-1.5 text-xs font-medium bg-green-50 text-green-700 hover:bg-green-100 rounded-lg transition-colors"
+            >
+              📅 Planner
             </button>
             <button
               onClick={() => setEditingDate(d)}
@@ -916,6 +945,51 @@ export default function SpecialDatesPage() {
 
       {editingDate && (
         <EditDateModal date={editingDate} onClose={() => setEditingDate(null)} />
+      )}
+
+      {/* Schedule to planner modal */}
+      {schedulingDate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSchedulingDate(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-base font-semibold text-gray-900">Agregar al planner</h2>
+              <button onClick={() => setSchedulingDate(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
+            </div>
+            <p className="text-sm text-gray-700 font-medium mb-4">{schedulingDate.title}</p>
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Canal</label>
+                <select value={schedChannel} onChange={e => setSchedChannel(e.target.value as 'tumblr' | 'x')}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="tumblr">Tumblr</option>
+                  <option value="x">X / Twitter</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Franja horaria</label>
+                <select value={schedDayPart} onChange={e => setSchedDayPart(e.target.value as 'morning' | 'afternoon' | 'evening')}
+                  className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="morning">Mañana (~8–11 am)</option>
+                  <option value="afternoon">Tarde (~12–3 pm)</option>
+                  <option value="evening">Noche (~6–9 pm)</option>
+                </select>
+              </div>
+            </div>
+            {schedResult && (
+              <div className={`mb-4 px-3 py-2 rounded text-xs border ${schedResult.startsWith('Error') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-800'}`}>
+                {schedResult}
+              </div>
+            )}
+            <button
+              type="button"
+              disabled={schedSaving}
+              onClick={() => handleSchedule(schedulingDate)}
+              className="w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {schedSaving ? 'Creando slot…' : '📅 Crear slot en planner'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

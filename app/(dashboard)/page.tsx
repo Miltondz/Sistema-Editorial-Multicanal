@@ -1,4 +1,6 @@
 'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { KPISection } from '@/components/dashboard/KPISection'
@@ -11,6 +13,8 @@ import { AIInsightsPanel } from '@/components/dashboard/AIInsightsPanel'
 import { PublicationCalendar } from '@/components/dashboard/PublicationCalendar'
 
 export default function DashboardPage() {
+  const router = useRouter()
+  const [searchQuery, setSearchQuery] = useState('')
   // Dynamic Convex api ref; cast needed. Return validated against convex/contentItems.ts getDashboardStats.
   const stats = useQuery((api.contentItems as any).getDashboardStats, {})
   // Dynamic Convex api ref; cast required. Return validated against convex/contentItems.ts getDashboardSparklines.
@@ -27,10 +31,21 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           {/* Search */}
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-[#E5EAF2] bg-slate-50 text-slate-400 text-sm" style={{ minWidth: 420 }}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <span>Buscar contenido...</span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && searchQuery.trim()) {
+                  router.push(`/catalog?search=${encodeURIComponent(searchQuery.trim())}`)
+                }
+              }}
+              placeholder="Buscar contenido... (Enter)"
+              className="flex-1 bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+            />
           </div>
           {/* Bell */}
           <button className="w-9 h-9 rounded-xl border border-[#E5EAF2] bg-white flex items-center justify-center hover:bg-slate-50 transition-colors">
@@ -40,6 +55,7 @@ export default function DashboardPage() {
           </button>
           {/* New content */}
           <button
+            onClick={() => router.push('/catalog/new')}
             className="px-4 py-2 rounded-xl text-sm font-medium text-white flex items-center gap-2 transition-opacity hover:opacity-90"
             style={{ background: '#6366F1' }}
           >
