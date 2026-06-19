@@ -254,8 +254,8 @@ export const publishDirect = action({
         id: variant._id, status: 'published', publishedLastAt: Date.now(),
       })
       if (args.slotId) {
-        await ctx.runMutation(internal.scheduleSlots.deleteAfterPublishInternal, {
-          id: args.slotId,
+        await ctx.runMutation(internal.scheduleSlots.updateStatusInternal, {
+          id: args.slotId, status: 'published',
         })
       }
       await ctx.runMutation(internal.auditEvents.log, {

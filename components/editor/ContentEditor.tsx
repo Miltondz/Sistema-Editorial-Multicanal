@@ -5,6 +5,7 @@ import { api } from '@/convex/_generated/api'
 import { OriginBadge } from '@/components/catalog/OriginBadge'
 import { VariantPanel } from '@/components/editor/VariantPanel'
 import { ResearchAssistant } from '@/components/editor/ResearchAssistant'
+import { AILoadingSpinner } from '@/components/ui/AILoadingSpinner'
 import type {
   ContentItem, ContentType, ContentOrigin, EvergreenClass,
   CreatorRole, Creator, MediaAsset,
@@ -475,6 +476,10 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
             >
               {extracting ? 'Extrayendo…' : '✦ Extraer desde post original'}
             </button>
+
+            {extracting && (
+              <AILoadingSpinner model="gemini-2.5-flash-lite" type="extract" />
+            )}
 
             {extractError && (
               <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">

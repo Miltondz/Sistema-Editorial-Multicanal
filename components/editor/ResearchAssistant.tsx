@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { useAction } from 'convex/react'
 import { api } from '@/convex/_generated/api'
+import { AILoadingSpinner } from '@/components/ui/AILoadingSpinner'
 
 interface Proposal {
   title?: string
@@ -88,9 +89,14 @@ export function ResearchAssistant({ onApply }: ResearchAssistantProps) {
           disabled={loading || !input.trim()}
           className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
         >
-          {loading ? 'Investigando…' : 'Investigar con IA'}
+          {loading ? 'Buscando…' : 'Investigar con IA'}
         </button>
       </div>
+
+      {/* AI loading */}
+      {loading && (
+        <AILoadingSpinner model="perplexity/sonar" type="search" />
+      )}
 
       {/* Error */}
       {error && (

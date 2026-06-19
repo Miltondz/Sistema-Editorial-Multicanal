@@ -15,8 +15,12 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
   })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const deleteItem = useMutation((api.contentItems as any).deleteItem)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recomputeScores = useAction((api.actions as any).scoring.recomputeAllScores)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [recomputing, setRecomputing] = useState(false)
+  const [recomputeMsg, setRecomputeMsg] = useState<string | null>(null)
 
   async function handleDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return }
@@ -85,9 +89,30 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
       {/* Score breakdown */}
       {scores && scores.length > 0 && (
         <div className="mt-6 bg-white rounded-lg border border-gray-200 p-5">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
-            Scores por canal
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+              Scores por canal
+            </h2>
+            <button
+              type="button"
+              disabled={recomputing}
+              onClick={async () => {
+                setRecomputing(true); setRecomputeMsg(null)
+                try {
+                  await recomputeScores({ channel: 'tumblr' })
+                  await recomputeScores({ channel: 'x' })
+                  setRecomputeMsg('Scores actualizados.')
+                } catch { setRecomputeMsg('Error al actualizar.') }
+                finally { setRecomputing(false) }
+              }}
+              className="px-3 py-1.5 text-xs border border-gray-300 text-gray-600 rounded-md hover:bg-gray-50 disabled:opacity-50"
+            >
+              {recomputing ? 'Calculando…' : '↻ Actualizar scores'}
+            </button>
+          </div>
+          {recomputeMsg && (
+            <p className="text-xs text-gray-500 mb-3">{recomputeMsg}</p>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             {(scores as any[]).map(s => (

@@ -662,10 +662,17 @@ function SlotPill({
       onDragEnd={onDragEnd}
       onClick={onClick}
       title={slot.item?.title ?? 'Sin contenido'}
-      className={`rounded px-1.5 py-1 text-[10px] select-none transition-all cursor-pointer border-l-4 ${typeColor} ${borderColor} ${
+      className={`relative overflow-hidden rounded px-1.5 py-1 text-[10px] select-none transition-all cursor-pointer border-l-4 ${typeColor} ${borderColor} ${
         draggable ? 'hover:brightness-95 active:opacity-70' : 'opacity-80'
       }`}
     >
+      {slot.status === 'published' && (
+        <div className="absolute inset-0 pointer-events-none rounded overflow-hidden">
+          <div className="absolute inset-0" style={{
+            background: 'linear-gradient(135deg, transparent calc(50% - 1px), rgba(220,38,38,0.75) calc(50% - 1px), rgba(220,38,38,0.75) calc(50% + 1px), transparent calc(50% + 1px))'
+          }} />
+        </div>
+      )}
       <div className="flex items-center gap-1 mb-0.5">
         {slot.locked && <span title="Bloqueado" className="text-[9px]">🔒</span>}
         <span className="text-[9px] font-semibold opacity-80">

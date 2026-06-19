@@ -5,6 +5,7 @@ import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
 import type { Channel, VariantStatus } from '@/lib/types/domain'
 import { RichTextEditor } from './RichTextEditor'
+import { AILoadingSpinner } from '@/components/ui/AILoadingSpinner'
 
 const STATUS_LABELS: Record<VariantStatus, string> = {
   not_started: 'Sin empezar',
@@ -301,6 +302,11 @@ function ChannelVariantCard({ contentItemId, channel, itemStatus }: ChannelCardP
             </button>
           </div>
         </div>
+      )}
+
+      {/* AI generating */}
+      {generating && (
+        <AILoadingSpinner model="openai/gpt-4o" type="generate" />
       )}
 
       {/* Generate error */}
