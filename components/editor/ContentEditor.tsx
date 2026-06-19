@@ -452,7 +452,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
 
       {/* Historic extraction — imported items in edit mode */}
       {mode === 'edit' && initialItem?.contentOrigin === 'imported' && savedId && (
-        <Section title="Extraer datos del post original">
+        <Section title="Extraer datos del post original" defaultOpen={true}>
           <div className="space-y-3">
             <p className="text-xs text-gray-500">
               Usa IA para analizar el texto del post original y proponer valores para los campos del ítem.
@@ -543,7 +543,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
 
       {/* Research Assistant — create mode only */}
       {mode === 'create' && (
-        <Section title="Asistente de investigación IA">
+        <Section title="Asistente de investigación IA" defaultOpen={true}>
           <ResearchAssistant
             onApply={proposal => {
               update({
@@ -564,7 +564,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
       )}
 
       {/* Basic fields */}
-      <Section title="Información básica">
+      <Section title="Información básica" defaultOpen={true}>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Tipo de contenido" required>
             <select
@@ -651,12 +651,20 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
       </Section>
 
       {/* Creators */}
-      <Section title="Creadores/as">
+      <Section
+        title="Creadores/as"
+        defaultOpen={form.creators.length > 0}
+        badge={form.creators.length > 0 ? (
+          <span className="text-[10px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full font-semibold">
+            {form.creators.length}
+          </span>
+        ) : undefined}
+      >
         <CreatorsEditor creators={form.creators} onChange={c => update({ creators: c })} />
       </Section>
 
       {/* Characters & tags */}
-      <Section title="Personajes y etiquetas">
+      <Section title="Personajes y etiquetas" defaultOpen={true}>
         <Field label="Personajes" hint="Separados por coma">
           <input
             type="text"
@@ -697,7 +705,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
       </Section>
 
       {/* Editorial metadata */}
-      <Section title="Metadatos editoriales">
+      <Section title="Metadatos editoriales" defaultOpen={false}>
         <div className="grid grid-cols-3 gap-4">
           <Field label="Prioridad editorial">
             <select
@@ -772,7 +780,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
 
       {/* Source info (read-only for edit, editable for create when imported) */}
       {(form.contentOrigin === 'imported' || mode === 'edit') && (
-        <Section title="Trazabilidad de origen">
+        <Section title="Trazabilidad de origen" defaultOpen={false}>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Plataforma">
               <select
@@ -828,7 +836,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
 
       {/* Media — only shown on edit once we have an ID */}
       {savedId && (
-        <Section title="Imágenes">
+        <Section title="Imágenes" defaultOpen={true}>
           <MediaUploader
             contentItemId={savedId}
             media={initialItem?.media ?? []}
@@ -844,7 +852,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
 
       {/* Variants & Publishing — edit mode only */}
       {mode === 'edit' && savedId && (
-        <Section title="Variantes de publicación">
+        <Section title="Variantes de publicación" defaultOpen={true}>
           <VariantPanel contentItemId={savedId} itemStatus={initialItem?.status ?? 'draft'} />
         </Section>
       )}
@@ -921,13 +929,34 @@ function FlowStepper({ status }: { status: string }) {
 const INPUT_CLASS =
   'mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500'
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+  defaultOpen = true,
+  badge,
+}: {
+  title: string
+  children: React.ReactNode
+  defaultOpen?: boolean
+  badge?: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <div>
-      <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-4 pb-2 border-b border-gray-100">
-        {title}
-      </h3>
-      <div className="space-y-4">{children}</div>
+    <div className="border border-gray-100 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wider">{title}</h3>
+          {badge}
+        </div>
+        <span className={`text-gray-400 text-xs transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▼</span>
+      </button>
+      {open && (
+        <div className="px-4 py-4 space-y-4">{children}</div>
+      )}
     </div>
   )
 }
