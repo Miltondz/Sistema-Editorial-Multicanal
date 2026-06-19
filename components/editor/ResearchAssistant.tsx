@@ -18,6 +18,13 @@ interface Proposal {
   editorialPriority?: number
 }
 
+interface ResearchResult {
+  proposedItem: Proposal
+  confidence: number
+  possibleDuplicates: Array<{ id: string; title: string; similarity: number }>
+  sourcesUsed: string[]
+}
+
 interface ResearchAssistantProps {
   onApply: (proposal: Proposal) => void
 }
@@ -32,6 +39,7 @@ export function ResearchAssistant({ onApply }: ResearchAssistantProps) {
   const [proposal, setProposal]   = useState<Proposal | null>(null)
   const [confidence, setConfidence] = useState(0)
   const [duplicates, setDuplicates] = useState<Array<{ id: string; title: string; similarity: number }>>([])
+  const [sourcesUsed, setSourcesUsed] = useState<string[]>([])
   const [applied, setApplied]     = useState(false)
 
   async function handleResearch() {
@@ -40,14 +48,15 @@ export function ResearchAssistant({ onApply }: ResearchAssistantProps) {
     setError(null)
     setProposal(null)
     setDuplicates([])
+    setSourcesUsed([])
     setApplied(false)
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await researchContent({ input: input.trim() }) as any
+      const result = await researchContent({ input: input.trim() }) as ResearchResult
       setProposal(result.proposedItem as Proposal)
       setConfidence(result.confidence ?? 0)
       setDuplicates(result.possibleDuplicates ?? [])
+      setSourcesUsed(result.sourcesUsed ?? [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
@@ -170,6 +179,19 @@ export function ResearchAssistant({ onApply }: ResearchAssistantProps) {
                   {proposal.buyLink}
                 </a>
               </Row>
+            )}
+            {sourcesUsed.length > 0 && (
+              <div className="pt-2 border-t border-gray-100">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Fuentes consultadas</p>
+                <div className="space-y-0.5">
+                  {sourcesUsed.map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                      className="block text-xs text-indigo-500 hover:underline truncate">
+                      {url}
+                    </a>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </div>

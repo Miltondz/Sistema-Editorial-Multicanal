@@ -17,6 +17,131 @@ const contentTypeV = v.union(
 
 // ── researchContent ──────────────────────────────────────────────────────────
 
+const RESEARCH_PERPLEXITY_MODEL = 'perplexity/sonar' as const
+const RESEARCH_FALLBACK_MODEL   = 'openai/gpt-4o-search-preview' as const
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+
+const RESEARCH_SYSTEM_PROMPT = `You are a comics research engine with active web search access for SuperheroesInColor.com.
+
+Your job: given a title, URL, or description, search the web and return a complete editorial catalog entry as strict JSON.
+
+SEARCH SOURCES — check these in order:
+- leagueofcomicgeeks.com — issue metadata, creators, release dates
+- marvel.fandom.com / dc.fandom.com — character info, first appearances, creators
+- comicvine.gamespot.com — comprehensive issue/series/creator database
+- comics.org (Grand Comics Database) — publication records, creator credits
+- Official publisher sites: marvel.com, dc.com, imagecomics.com, darkhorse.com, boom-studios.com
+- Amazon, comixology, tfaw.com — buy links, ISBN, release info
+- lambiek.net — international creator bios
+- Wikipedia — general background on series, adaptations, awards
+
+RULES:
+- Search actively — do not rely only on training data
+- Use the exact published title, issue number, and year from official sources
+- For creators: name writer AND interior artist specifically; include colorist if notable
+- For identity tags: name specific identities (Black, Latina, queer, trans) — never use "diverse" or "minority"
+- Return ONLY valid JSON. No markdown, no prose, no explanations outside the JSON.
+`.trim()
+
+function buildResearchPrompt(input: string, contentType?: string): string {
+  const typeHint = contentType
+    ? `Content type is: ${contentType}.`
+    : 'Infer the content type from the input (comic, libro, autor, cosplay, articulo, poster, pelicula, personaje, coleccion).'
+
+  return `Research and build a complete catalog entry for this content:
+
+INPUT: "${input}"
+${typeHint}
+
+TITLE FORMAT RULES:
+- Comic/manga: "Series Title Vol.N #Issue (Year)" — e.g., "Hardware: Season One #4 (2022)"
+- Series only (no specific issue): "Title (Year)" — e.g., "Black Panther (2016)"
+- Book/novel: "Title (Year)" — e.g., "Shook! A Black Horror Anthology (2024)"
+- Film/TV: "Title (Year)" — e.g., "The Eternaut (2025)"
+- Cosplay: "Character Name #Cosplay by Cosplayer Name"
+- Use the EXACT title as published — verify against publisher site or League of Comic Geeks.
+
+Return ONLY this JSON object (no markdown, no extra text):
+{
+  "title": "<exact formatted title>",
+  "contentType": "<comic|libro|autor|cosplay|articulo|poster|pelicula|personaje|coleccion>",
+  "summary": "<2–3 sentences: story premise and who is represented — race, ethnicity, gender, nationality of characters/creators. Be specific. Never use 'diverse'.>",
+  "franchise": "<parent universe or franchise, e.g. 'DC Universe', 'Marvel 616', or empty string>",
+  "publisher": "<publisher or studio name, e.g. 'DC Comics', 'Marvel', 'Image Comics', or empty string>",
+  "characters": ["<main character name>"],
+  "creators": [
+    { "role": "<writer|artist|cover_artist|colorist|photographer|other>", "name": "<full name>" }
+  ],
+  "representationTags": ["<identity tags — e.g.: Black, Latina, Indigenous, queer, trans, Asian-American, Afro-Latino, bisexual, disabled. Max 8. Only confirmed identities.>"],
+  "themeTags": ["<thematic tags — e.g.: identity, legacy, family, resistance, afrofuturism, mythology, coming-of-age. Max 6.>"],
+  "buyLink": "<official purchase URL — Amazon, Comixology, publisher store. Empty string if not found.>",
+  "evergreenClass": "<high|medium|low — high: classic/iconic works; medium: seasonal/cyclical; low: tied to a news moment>",
+  "editorialPriority": 3,
+  "confidence": <0.0–1.0 — 0.9+ if verified from official source; 0.6 if inferred from reliable reference; 0.3 if mostly guessing>,
+  "sourcesUsed": ["<URL 1 you retrieved>", "<URL 2 you retrieved>"]
+}`.trim()
+}
+
+async function callResearchModel(
+  model: string,
+  input: string,
+  contentType: string | undefined,
+  label: string
+): Promise<{ parsed: any; sourcesUsed: string[] } | null> {
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY not set')
+
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001',
+      'X-Title': 'SuperheroesInColor CMS',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 3000,
+      messages: [
+        { role: 'system', content: RESEARCH_SYSTEM_PROMPT },
+        { role: 'user',   content: buildResearchPrompt(input, contentType) },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.text()
+    throw new Error(`OpenRouter [${label}] ${response.status}: ${err}`)
+  }
+
+  const data = await response.json()
+  const raw: string = data.choices?.[0]?.message?.content ?? ''
+  console.log(`[researchContent:${label}] finish_reason:`, data.choices?.[0]?.finish_reason)
+  console.log(`[researchContent:${label}] raw length:`, raw.length)
+
+  if (!raw.trim()) return null
+
+  // Strip markdown fences + extract JSON object
+  let jsonStr = raw.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim()
+  const objStart = jsonStr.indexOf('{')
+  const objEnd   = jsonStr.lastIndexOf('}')
+  if (objStart !== -1 && objEnd !== -1) jsonStr = jsonStr.slice(objStart, objEnd + 1)
+
+  let parsed: any
+  try {
+    parsed = JSON.parse(jsonStr)
+  } catch {
+    console.error(`[researchContent:${label}] JSON parse failed:`, jsonStr.slice(0, 500))
+    return null
+  }
+
+  const sourcesUsed: string[] = Array.isArray(parsed.sourcesUsed)
+    ? parsed.sourcesUsed.filter((s: unknown) => typeof s === 'string')
+    : []
+
+  return { parsed, sourcesUsed }
+}
+
 export const researchContent = action({
   args: {
     input: v.string(),
@@ -28,58 +153,16 @@ export const researchContent = action({
     possibleDuplicates: Array<{ id: string; title: string; similarity: number }>
     sourcesUsed: string[]
   }> => {
-    const typeHint = args.contentType ? `The content type is: ${args.contentType}.` : 'Infer the content type from the input.'
-
-    const userMessage = `Create an editorial catalog entry for SuperheroesInColor based on the following input:
-
-INPUT: "${args.input}"
-
-${typeHint}
-
-TITLE FORMAT RULES:
-- Comics/manga: "Title Vol.N #Issue (Year)" — e.g., "Hardware: Season One #4 (2022)" or "Miles Morales: Spider-Man #1 (2019)"
-- If only series title known (no issue): "Title (Year)" — e.g., "Black Panther (2016)"
-- Books/novels: "Title (Year)" — include series name in parentheses if part of a series: "2043... (A Merman I Should Turn to Be) (Black Stars)"
-- Film/TV: "Title (Year)" — e.g., "The Eternaut (2025)"
-- Cosplay: "Character Name #Cosplay by Cosplayer Name"
-- Use the EXACT title as published. Check against League of Comic Geeks (leagueofcomicgeeks.com), Marvel Database (marvel.fandom.com), DC Database (dc.fandom.com), or publisher sites for accuracy.
-
-Return ONLY a valid JSON object with this exact structure (no markdown, no extra text):
-{
-  "title": "formatted title following the rules above",
-  "contentType": "one of: comic, libro, autor, cosplay, articulo, poster, pelicula, personaje, coleccion",
-  "summary": "2-3 sentence editorial summary. Be specific about who is represented (race, ethnicity, gender, nationality of characters/creators when known). Do not use the word 'diverse' — name the actual identity.",
-  "franchise": "parent franchise or universe if applicable, otherwise empty string",
-  "publisher": "publisher or studio name, otherwise empty string",
-  "characters": ["array of main character names featured"],
-  "creators": [
-    { "role": "one of: writer, artist, cover_artist, colorist, photographer, other", "name": "full name" }
-  ],
-  "representationTags": ["specific identity tags — e.g. Black, Latina, Indigenous, queer, trans, Asian-American, Afro-Latino. Max 8. Only include what is known or clearly evident."],
-  "themeTags": ["thematic tags — e.g. identity, legacy, family, resistance, afrofuturism, mythology, coming-of-age. Max 6."],
-  "buyLink": "official purchase or info URL if known (Amazon, comixology, publisher store), otherwise empty string",
-  "evergreenClass": "high if the content remains relevant indefinitely (classic works, iconic characters), medium if seasonally or cyclically relevant, low if tied to a specific news moment",
-  "editorialPriority": 3,
-  "confidence": 0.0
-}
-
-confidence: float 0.0–1.0. Use 0.9+ only if you are certain about the details (familiar title, verified creators). Use 0.5 if inferring from partial info. Use 0.3 if mostly guessing.`
-
-    let rawText: string
-    try {
-      rawText = await complete(SYSTEM_PROMPT_BASE, userMessage, 2000)
-    } catch (err) {
-      throw new Error(`Error calling OpenRouter: ${err instanceof Error ? err.message : String(err)}`)
+    // Try Perplexity sonar first (web search), fall back to gpt-4o-search
+    let result = await callResearchModel(RESEARCH_PERPLEXITY_MODEL, args.input, args.contentType, 'perplexity')
+    if (!result) {
+      console.log('[researchContent] perplexity empty — gpt-4o-search fallback')
+      result = await callResearchModel(RESEARCH_FALLBACK_MODEL, args.input, args.contentType, 'gpt4o-search')
     }
+    if (!result) throw new Error('Ambos modelos retornaron vacío')
 
-    let parsed: any
-    try {
-      parsed = parseJsonSafe<any>(rawText)
-    } catch {
-      throw new Error(`AI returned non-JSON response: ${rawText.slice(0, 200)}`)
-    }
-
-    const { confidence, ...proposedItem } = parsed
+    const { parsed, sourcesUsed } = result
+    const { confidence, sourcesUsed: _s, ...proposedItem } = parsed
 
     const possibleDuplicates: Array<{ id: string; title: string; similarity: number }> = []
     if (proposedItem.title) {
@@ -96,7 +179,7 @@ confidence: float 0.0–1.0. Use 0.9+ only if you are certain about the details 
       proposedItem: proposedItem as Record<string, unknown>,
       confidence: typeof confidence === 'number' ? confidence : 0,
       possibleDuplicates,
-      sourcesUsed: [],
+      sourcesUsed,
     }
   },
 })
