@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
 import { useMutation, useAction, useQuery } from 'convex/react'
+import Link from 'next/link'
 import { api } from '@/convex/_generated/api'
 import { findDuplicateCandidates } from '@/lib/quality/similarity'
 import { OriginBadge } from '@/components/catalog/OriginBadge'
@@ -135,11 +136,18 @@ function MediaUploader({
     }
   }
 
+  const [altError, setAltError] = useState<string | null>(null)
+
   async function handleAltSave(assetId: string) {
     const val = altEditing[assetId]
     if (val === undefined) return
-    await updateAltText({ id: assetId as any, altText: val })
-    setAltEditing(prev => { const n = { ...prev }; delete n[assetId]; return n })
+    setAltError(null)
+    try {
+      await updateAltText({ id: assetId as any, altText: val })
+      setAltEditing(prev => { const n = { ...prev }; delete n[assetId]; return n })
+    } catch (err) {
+      setAltError(err instanceof Error ? err.message : 'Error al guardar alt text')
+    }
   }
 
   return (
@@ -211,6 +219,10 @@ function MediaUploader({
           </div>
         ))}
       </div>
+
+      {altError && (
+        <p className="text-xs text-red-600 mb-2">{altError}</p>
+      )}
 
       <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 border border-dashed border-gray-300 rounded-md text-sm text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors">
         {uploading ? 'Subiendo...' : '+ Subir imagen'}
@@ -313,10 +325,10 @@ function DuplicateDetector({ title }: { title: string }) {
     <div className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
       <p className="text-xs font-medium text-amber-800 mb-1">Posibles duplicados:</p>
       {candidates.map(c => (
-        <a key={c.id} href={`/catalog/${c.id}`} target="_blank" rel="noopener noreferrer"
+        <Link key={c.id} href={`/catalog/${c.id}`} target="_blank" rel="noopener noreferrer"
           className="block text-xs text-amber-700 hover:underline truncate">
           · {c.title} <span className="text-amber-400">({Math.round(c.similarity * 100)}% similar)</span>
-        </a>
+        </Link>
       ))}
     </div>
   )

@@ -1,5 +1,9 @@
 // Pure linter — no external deps, safe to run server or client side
 
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()
+}
+
 export interface LintViolation {
   field: 'headline' | 'bodyText' | 'ctaText'
   rule: string
@@ -46,7 +50,7 @@ export function lintVariant(variant: {
   const violations: LintViolation[] = []
   const fields: Array<{ key: 'headline' | 'bodyText' | 'ctaText'; text: string }> = [
     { key: 'headline', text: variant.headline ?? '' },
-    { key: 'bodyText', text: variant.bodyText ?? '' },
+    { key: 'bodyText', text: stripHtml(variant.bodyText ?? '') },
     { key: 'ctaText',  text: variant.ctaText  ?? '' },
   ]
   for (const { key, text } of fields) {

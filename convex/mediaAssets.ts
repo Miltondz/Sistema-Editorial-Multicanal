@@ -205,6 +205,12 @@ export const updateAltText = mutation({
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.id, { altText: args.altText })
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'mediaAsset',
+      entityId: args.id,
+      eventType: 'mediaAsset.altTextUpdated',
+      payloadJson: { altText: args.altText },
+    })
   },
 })
 

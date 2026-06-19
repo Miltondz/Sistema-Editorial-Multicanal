@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { usePaginatedQuery, useMutation } from 'convex/react'
@@ -20,6 +20,14 @@ const BULK_ACTIONS: { value: BulkAction; label: string; danger?: boolean }[] = [
 ]
 
 export default function CatalogPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-gray-400">Cargando catálogo…</div>}>
+      <CatalogContent />
+    </Suspense>
+  )
+}
+
+function CatalogContent() {
   const searchParams = useSearchParams()
   const [filters, setFilters] = useState<FilterState>({
     search:           searchParams.get('search') ?? '',
