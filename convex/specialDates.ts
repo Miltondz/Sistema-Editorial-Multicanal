@@ -115,11 +115,11 @@ export const generateBannerUploadUrl = mutation({
 export const confirmBannerUpload = mutation({
   args: {
     id: v.id('specialDates'),
-    storageId: v.string(),
+    storageId: v.id('_storage'),
     alt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const url = await ctx.storage.getUrl(args.storageId as any)
+    const url = await ctx.storage.getUrl(args.storageId)
     if (!url) throw new Error('Storage URL not found')
     await ctx.db.patch(args.id, { bannerImageUrl: url, bannerImageAlt: args.alt })
     return url

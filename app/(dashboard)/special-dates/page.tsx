@@ -134,12 +134,13 @@ function BannerUploader({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const generateUploadUrl = useMutation((api.specialDates as any).generateBannerUploadUrl)
   const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    setUploading(true)
+    setUploading(true); setUploadError(null)
     try {
       const uploadUrl = await generateUploadUrl({})
       const res = await fetch(uploadUrl, {
@@ -147,14 +148,11 @@ function BannerUploader({
         headers: { 'Content-Type': file.type },
         body: file,
       })
+      if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`)
       const { storageId } = await res.json()
-      // Use storage URL pattern — Convex returns the public URL in the upload response
-      // We store storageId temporarily, parent must call confirmBannerUpload later
-      // Simpler: call ctx.storage.getUrl via a Convex query isn't possible client-side
-      // Instead: we store storageId as the "url" and handle it in the save mutation
       onUrlChange(`convex-storage:${storageId}`)
     } catch (err) {
-      console.error('Upload failed:', err)
+      setUploadError(err instanceof Error ? err.message : 'Error al subir imagen')
     } finally {
       setUploading(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -186,6 +184,9 @@ function BannerUploader({
       </div>
       {isStorageRef && (
         <p className="text-[11px] text-indigo-600">✓ Imagen subida — se guardará al confirmar</p>
+      )}
+      {uploadError && (
+        <p className="text-[11px] text-red-600">{uploadError}</p>
       )}
       {displayUrl && (
         // eslint-disable-next-line @next/next/no-img-element
@@ -578,14 +579,15 @@ export default function SpecialDatesPage() {
   const [fBanner,    setFBanner]    = useState('')
   const [fBannerAlt, setFBannerAlt] = useState('')
   const [fDiversity, setFDiversity] = useState('')
-  const [saving,     setSaving]     = useState(false)
+  const [saving,      setSaving]      = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   const inputClass = 'w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500'
   const labelClass = 'block text-xs font-medium text-gray-600 mb-1'
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
-    setSaving(true)
+    setSaving(true); setCreateError(null)
     try {
       let bannerUrl = fBanner
       // temp storage ref handling: can't resolve without a doc id, so skip upload for new items
@@ -615,6 +617,8 @@ export default function SpecialDatesPage() {
       setShowForm(false)
       setFDate(''); setFType('anniversary'); setFTitle(''); setFDesc(''); setFTags('')
       setFScore(5); setFCategory(''); setFTeaser(''); setFBanner(''); setFBannerAlt(''); setFDiversity('')
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }
   }
 
@@ -844,6 +848,8 @@ export default function SpecialDatesPage() {
                 placeholder="Descripción accesible de la imagen" />
             </div>
           )}
+
+          {createError && <p className="text-xs text-red-600">{createError}</p>}
 
           <button type="submit" disabled={saving}
             className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 hover:bg-indigo-500 transition-colors">
