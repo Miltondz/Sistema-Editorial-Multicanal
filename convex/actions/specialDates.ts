@@ -13,27 +13,27 @@ export const generateIdeas = action({
     description: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ ideas: Array<{ title: string; body: string; hashtags: string[] }> }> => {
-    const context = args.description ? `Contexto adicional: ${args.description}` : ''
+    const context = args.description ? `Additional context: ${args.description}` : ''
 
-    const userMessage = `Eres editor de contenido de SuperheroesInColor, especializado en comics con diversidad e inclusión.
+    const userMessage = `You are the content editor for SuperheroesInColor, specializing in diverse and inclusive comics.
 
-Para la fecha especial: "${args.title}"
+Special date: "${args.title}"
 ${context}
 
-Genera 3 ideas de publicaciones para redes sociales (Tumblr y X/Twitter).
-Cada idea debe celebrar o conmemorar esta fecha con contenido editorial relevante.
+Generate 3 post ideas for social media (Tumblr and X/Twitter) celebrating or commemorating this date.
+All text MUST be in English. Be specific, enthusiastic, and educational.
 
-Responde SOLO con un objeto JSON válido, sin markdown:
+Respond ONLY with valid JSON (no markdown):
 {
   "ideas": [
-    { "title": "título corto impactante", "body": "texto de la publicación (2-3 oraciones)", "hashtags": ["#tag1", "#tag2"] },
+    { "title": "Short impactful title (English)", "body": "Post text (2-3 sentences, English)", "hashtags": ["#tag1", "#tag2"] },
     { "title": "...", "body": "...", "hashtags": ["..."] },
     { "title": "...", "body": "...", "hashtags": ["..."] }
   ]
 }`
 
     const raw = await complete(
-      'Eres un editor de contenido especializado en cómics de superhéroes con diversidad.',
+      'You are a content editor specializing in diverse superhero comics. Always write in English.',
       userMessage,
       800
     )
@@ -41,7 +41,7 @@ Responde SOLO con un objeto JSON válido, sin markdown:
     const parsed = parseJsonSafe<{ ideas: Array<{ title: string; body: string; hashtags: string[] }> }>(raw)
 
     const ideas = parsed?.ideas ?? [
-      { title: `Recordando: ${args.title}`, body: 'Una fecha especial en la historia del cómic.', hashtags: ['#SuperheroesInColor', '#Comics'] },
+      { title: `Celebrating: ${args.title}`, body: 'A special date in comics history.', hashtags: ['#SuperheroesInColor', '#Comics'] },
     ]
 
     await ctx.runMutation(internal.specialDates.saveIdeas, {
