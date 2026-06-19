@@ -15,33 +15,46 @@ export const generateIdeas = action({
   handler: async (ctx, args): Promise<{ ideas: Array<{ title: string; body: string; hashtags: string[] }> }> => {
     const context = args.description ? `Additional context: ${args.description}` : ''
 
-    const userMessage = `You are the content editor for SuperheroesInColor, specializing in diverse and inclusive comics.
+    const systemPrompt = `You are the senior editorial writer for SuperheroesInColor, a platform dedicated to diversity and inclusion in comics. You write in English only. Your editorial style is:
+- Grounded in real historical or cultural context (specific years, names, facts)
+- Educational and reflective, not promotional
+- Connects the special date to specific diverse comic book characters and their themes (systemic inequality, cultural identity, community leadership, scientific innovation, civil rights, representation)
+- NEVER promotes future posts, activities, or "stay tuned" content
+- NEVER says "follow us", "share this", "coming soon", or references anything outside the post itself
+- Each post is fully self-contained — it tells a complete story on its own
+- Tone: informed, enthusiastic, respectful, inspiring`
 
-Special date: "${args.title}"
+    const userMessage = `Special date: "${args.title}"
 ${context}
 
-Generate 3 post ideas for social media (Tumblr and X/Twitter) celebrating or commemorating this date.
-All text MUST be in English. Be specific, enthusiastic, and educational.
+Generate 3 fully written editorial posts for Tumblr/social media commemorating this date.
+Each post must follow this 4-paragraph structure:
+1. Historical/factual context — who, what, when, where, why this date matters
+2. Present-day significance — how this connects to ongoing social issues or progress
+3. Specific comic characters — name 3-5 real diverse characters whose stories directly relate to this theme, naming the specific issues they address (e.g. systemic inequality, cultural identity, etc.)
+4. Inspiring close — connects the characters' journeys to real-world meaning; forward-looking but grounded in what already exists
 
-Respond ONLY with valid JSON (no markdown):
+Each body should be approximately 300-400 words. Do NOT include any call to action, future promotion, or self-referential language.
+
+Respond ONLY with valid JSON (no markdown, no code blocks):
 {
   "ideas": [
-    { "title": "Short impactful title (English)", "body": "Post text (2-3 sentences, English)", "hashtags": ["#tag1", "#tag2"] },
+    {
+      "title": "Compelling post title (English, 8-14 words)",
+      "body": "Full 4-paragraph editorial post in plain text (no HTML). ~300-400 words.",
+      "hashtags": ["#Tag1", "#Tag2", "#Tag3", "#Tag4", "#Tag5"]
+    },
     { "title": "...", "body": "...", "hashtags": ["..."] },
     { "title": "...", "body": "...", "hashtags": ["..."] }
   ]
 }`
 
-    const raw = await complete(
-      'You are a content editor specializing in diverse superhero comics. Always write in English.',
-      userMessage,
-      800
-    )
+    const raw = await complete(systemPrompt, userMessage, 2400)
 
     const parsed = parseJsonSafe<{ ideas: Array<{ title: string; body: string; hashtags: string[] }> }>(raw)
 
     const ideas = parsed?.ideas ?? [
-      { title: `Celebrating: ${args.title}`, body: 'A special date in comics history.', hashtags: ['#SuperheroesInColor', '#Comics'] },
+      { title: `Celebrating: ${args.title}`, body: 'A special date in comics history worth remembering.', hashtags: ['#SuperheroesInColor', '#Comics', '#Diversity'] },
     ]
 
     await ctx.runMutation(internal.specialDates.saveIdeas, {
@@ -62,19 +75,26 @@ export const developIdea = action({
     diversityTags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args): Promise<{ contentItemId: string }> => {
-    const systemPrompt = 'You are the editorial content writer for SuperheroesInColor, a platform celebrating diversity and inclusion in comics. Write engaging, enthusiastic, and educational content in English.'
+    const systemPrompt = `You are the senior editorial writer for SuperheroesInColor. Convert the provided editorial content into a formatted Tumblr post.
+Rules:
+- Write in English only
+- Self-contained — no "follow us", "stay tuned", "coming soon", "share this", or any future promotion
+- Use <p> tags for paragraphs, <b> for bold emphasis on key names or terms
+- Keep all 4 paragraphs: historical context → present-day significance → specific comic characters → inspiring close
+- Do NOT invent facts; use only what is provided in the source text`
 
-    const userPrompt = `Special Date being commemorated: "${args.specialDateTitle}"
-Idea to develop: "${args.ideaTitle}"
-Context: ${args.ideaBody}
+    const userPrompt = `Special date: "${args.specialDateTitle}"
+Title: "${args.ideaTitle}"
 
-Write a full Tumblr editorial post in English for this special date.
-The post should celebrate diversity in comics, be enthusiastic and educational, and feel like authentic editorial content.
+Source editorial text to convert to HTML:
+${args.ideaBody}
+
+Format this as a Tumblr post. Wrap each paragraph in <p></p> tags. Bold (<b></b>) key character names, dates, and important terms.
 
 Return ONLY valid JSON (no markdown, no code blocks):
 {
-  "headline": "Compelling headline (8-15 words)",
-  "bodyHTML": "<p>First paragraph (60-80 words) — introduce the date/character/creator. Use <b>bold</b> for emphasis.</p><p>Second paragraph (60-80 words) — why this matters for diversity in comics. Include specific details.</p><p>Third paragraph (40-60 words) — call to read/discover, enthusiastic close.</p>",
+  "headline": "Post headline (8-14 words, same meaning as title)",
+  "bodyHTML": "<p>Paragraph 1...</p><p>Paragraph 2...</p><p>Paragraph 3...</p><p>Paragraph 4...</p>",
   "tags": "tag1, tag2, tag3, tag4, tag5"
 }`
 
