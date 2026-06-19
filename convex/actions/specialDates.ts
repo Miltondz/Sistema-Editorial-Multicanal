@@ -1,7 +1,7 @@
 "use node";
 
 import { action } from '../_generated/server'
-import { internal } from '../_generated/api'
+import { api, internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { complete, parseJsonSafe } from '../../lib/integrations/openrouter'
 import { searchSpecialDates } from '../../lib/specialDates'
@@ -50,6 +50,62 @@ Responde SOLO con un objeto JSON válido, sin markdown:
     })
 
     return { ideas }
+  },
+})
+
+export const developIdea = action({
+  args: {
+    specialDateTitle: v.string(),
+    ideaTitle: v.string(),
+    ideaBody: v.string(),
+    ideaHashtags: v.array(v.string()),
+    diversityTags: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args): Promise<{ contentItemId: string }> => {
+    const systemPrompt = 'You are the editorial content writer for SuperheroesInColor, a platform celebrating diversity and inclusion in comics. Write engaging, enthusiastic, and educational content in English.'
+
+    const userPrompt = `Special Date being commemorated: "${args.specialDateTitle}"
+Idea to develop: "${args.ideaTitle}"
+Context: ${args.ideaBody}
+
+Write a full Tumblr editorial post in English for this special date.
+The post should celebrate diversity in comics, be enthusiastic and educational, and feel like authentic editorial content.
+
+Return ONLY valid JSON (no markdown, no code blocks):
+{
+  "headline": "Compelling headline (8-15 words)",
+  "bodyHTML": "<p>First paragraph (60-80 words) — introduce the date/character/creator. Use <b>bold</b> for emphasis.</p><p>Second paragraph (60-80 words) — why this matters for diversity in comics. Include specific details.</p><p>Third paragraph (40-60 words) — call to read/discover, enthusiastic close.</p>",
+  "tags": "tag1, tag2, tag3, tag4, tag5"
+}`
+
+    const raw = await complete(systemPrompt, userPrompt, 800)
+    const parsed = parseJsonSafe<{ headline: string; bodyHTML: string; tags: string }>(raw)
+
+    const headline = parsed?.headline ?? args.ideaTitle
+    const bodyHTML  = parsed?.bodyHTML  ?? `<p>${args.ideaBody}</p>`
+    const tags      = parsed?.tags      ?? args.ideaHashtags.join(', ')
+
+    const repTags = (args.diversityTags ?? []).filter(Boolean)
+    const themeTags = args.ideaHashtags.map(h => h.replace(/^#/, '').trim()).filter(Boolean)
+
+    const contentItemId = await ctx.runMutation(api.contentItems.create, {
+      contentType:        'articulo',
+      title:              headline,
+      summary:            args.ideaBody,
+      representationTags: repTags,
+      themeTags,
+      contentOrigin:      'assisted',
+    }) as string
+
+    await ctx.runMutation(api.contentVariants.create, {
+      contentItemId: contentItemId as any,
+      channel:       'tumblr',
+      headline,
+      bodyText:      bodyHTML,
+      ctaText:       tags,
+    })
+
+    return { contentItemId }
   },
 })
 

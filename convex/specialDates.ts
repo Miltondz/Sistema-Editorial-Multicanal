@@ -61,6 +61,11 @@ export const create = mutation({
     contentType: v.optional(v.string()),
     tags: v.array(v.string()),
     relevanceScore: v.number(),
+    category: v.optional(v.string()),
+    teaserText: v.optional(v.string()),
+    bannerImageUrl: v.optional(v.string()),
+    bannerImageAlt: v.optional(v.string()),
+    diversityTags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert('specialDates', {
@@ -74,15 +79,50 @@ export const create = mutation({
 export const update = mutation({
   args: {
     id: v.id('specialDates'),
+    date: v.optional(v.string()),
+    dateType: v.optional(v.union(v.literal('anniversary'), v.literal('one_time'))),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     relevanceScore: v.optional(v.number()),
     active: v.optional(v.boolean()),
     tags: v.optional(v.array(v.string())),
+    category: v.optional(v.string()),
+    teaserText: v.optional(v.string()),
+    bannerImageUrl: v.optional(v.string()),
+    bannerImageAlt: v.optional(v.string()),
+    diversityTags: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const { id, ...patch } = args
     await ctx.db.patch(id, patch)
+  },
+})
+
+export const clearIdeas = mutation({
+  args: { id: v.id('specialDates') },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { aiIdeas: undefined })
+  },
+})
+
+export const generateBannerUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.storage.generateUploadUrl()
+  },
+})
+
+export const confirmBannerUpload = mutation({
+  args: {
+    id: v.id('specialDates'),
+    storageId: v.string(),
+    alt: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const url = await ctx.storage.getUrl(args.storageId as any)
+    if (!url) throw new Error('Storage URL not found')
+    await ctx.db.patch(args.id, { bannerImageUrl: url, bannerImageAlt: args.alt })
+    return url
   },
 })
 
