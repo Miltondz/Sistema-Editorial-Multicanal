@@ -89,6 +89,7 @@ export default defineSchema({
     sourcePostId: v.optional(v.string()),
     sourceDate: v.optional(v.number()),
     coverImageUrl: v.optional(v.string()),
+    importJobId: v.optional(v.id('importJobs')),
 
     enrichedManually: v.boolean(),
 
@@ -108,6 +109,7 @@ export default defineSchema({
     .index('by_origin', ['contentOrigin'])
     .index('by_source_platform', ['sourcePlatform'])
     .index('by_needs_review', ['needsReview'])
+    .index('by_import_job', ['importJobId'])
     .searchIndex('search_title', {
       searchField: 'title',
       filterFields: ['contentType', 'status', 'contentOrigin'],
@@ -180,7 +182,8 @@ export default defineSchema({
     .index('by_date', ['scheduledFor'])
     .index('by_date_and_channel', ['scheduledFor', 'channel'])
     .index('by_status', ['status'])
-    .index('by_channel_and_status', ['channel', 'status']),
+    .index('by_channel_and_status', ['channel', 'status'])
+    .index('by_content_item', ['contentItemId']),
 
   // ── PUBLICATION LOG ────────────────────
   publicationLog: defineTable({
@@ -266,4 +269,72 @@ export default defineSchema({
   })
     .index('by_entity', ['entityType', 'entityId'])
     .index('by_event_type', ['eventType']),
+
+  // ── EDITORIAL BANNER ──────────────────────
+  editorialBanner: defineTable({
+    title: v.string(),
+    description: v.string(),
+    badgeText: v.string(),
+    imageUrl: v.optional(v.string()),
+    ctaLabel: v.string(),
+    ctaHref: v.optional(v.string()),
+    active: v.boolean(),
+  })
+    .index('by_active', ['active']),
+
+  // ── SPECIAL DATES ─────────────────────────
+  specialDates: defineTable({
+    date: v.string(),
+    dateType: v.union(v.literal('anniversary'), v.literal('one_time')),
+    title: v.string(),
+    description: v.optional(v.string()),
+    contentType: v.optional(v.string()),
+    tags: v.array(v.string()),
+    aiGenerated: v.boolean(),
+    aiIdeas: v.optional(v.string()),
+    relevanceScore: v.number(),
+    active: v.boolean(),
+    // Rich fields populated by Perplexity search (all optional for backward compat)
+    titleShort: v.optional(v.string()),
+    yearOriginal: v.optional(v.number()),
+    category: v.optional(v.string()),
+    confidence: v.optional(v.string()),
+    teaserText: v.optional(v.string()),
+    bannerImageUrl: v.optional(v.string()),
+    bannerImageAlt: v.optional(v.string()),
+    diversityTags: v.optional(v.array(v.string())),
+    richDataJson: v.optional(v.any()),
+  })
+    .index('by_date', ['date'])
+    .index('by_active', ['active'])
+    .index('by_date_active', ['date', 'active']),
+
+  // ── COMICS RESEARCH ───────────────────────
+  comicsResearch: defineTable({
+    sessionName: v.string(),
+    dateFrom:    v.string(),
+    dateTo:      v.string(),
+    dateMode:    v.string(),
+    maxResults:  v.number(),
+    paramsJson:  v.optional(v.any()),
+    resultCount: v.number(),
+    rawJson:     v.optional(v.any()),
+    status:      v.union(v.literal('running'), v.literal('done'), v.literal('error')),
+    errorMessage: v.optional(v.string()),
+  })
+    .index('by_status', ['status']),
+
+  comicsResearchItems: defineTable({
+    sessionId:            v.id('comicsResearch'),
+    title:                v.string(),
+    issue:                v.string(),
+    publisher:            v.string(),
+    releaseDate:          v.string(),
+    confidence:           v.string(),
+    saved:                v.boolean(),
+    promotedToContentId:  v.optional(v.id('contentItems')),
+    itemJson:             v.any(),
+  })
+    .index('by_session', ['sessionId'])
+    .index('by_saved',   ['saved']),
 })

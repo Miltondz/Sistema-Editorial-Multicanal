@@ -292,12 +292,14 @@ const DEFAULT_FORM: FormData = {
 }
 
 export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps) {
-  const createItem  = useMutation(api.contentItems.create)
-  const updateItem  = useMutation(api.contentItems.update)
-  const approveItem = useMutation(api.contentItems.approve)
-  const archiveItem = useMutation(api.contentItems.archive)
+  const createItem        = useMutation(api.contentItems.create)
+  const updateItem        = useMutation(api.contentItems.update)
+  const approveItem       = useMutation(api.contentItems.approve)
+  const archiveItem       = useMutation(api.contentItems.archive)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const suggestTags = useAction(api.actions.ai.suggestTags as any)
+  const suggestTags       = useAction(api.actions.ai.suggestTags as any)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const extractFromHistoric = useAction((api.actions.ai as any).extractFromHistoric)
 
   const [form, setForm] = useState<FormData>(
     initialItem ? itemToForm(initialItem) : DEFAULT_FORM
@@ -307,6 +309,11 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
   const [savedId, setSavedId] = useState<Id<'contentItems'> | null>(
     initialItem?._id ?? null
   )
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [extracting, setExtracting] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [extractProposal, setExtractProposal] = useState<any | null>(null)
+  const [extractError, setExtractError] = useState<string | null>(null)
 
   function update(partial: Partial<FormData>) {
     setForm(f => ({ ...f, ...partial }))
@@ -440,6 +447,93 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
         <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 text-sm text-red-700">
           {error}
         </div>
+      )}
+
+      {/* Historic extraction — imported items in edit mode */}
+      {mode === 'edit' && initialItem?.contentOrigin === 'imported' && savedId && (
+        <Section title="Extraer datos del post original">
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">
+              Usa IA para analizar el texto del post original y proponer valores para los campos del ítem.
+              Usa el modelo económico configurado en el servidor.
+            </p>
+            <button
+              type="button"
+              disabled={extracting}
+              onClick={async () => {
+                setExtracting(true); setExtractProposal(null); setExtractError(null)
+                try {
+                  const result = await extractFromHistoric({ contentItemId: savedId })
+                  setExtractProposal(result)
+                } catch (err) {
+                  setExtractError(err instanceof Error ? err.message : 'Error')
+                } finally {
+                  setExtracting(false)
+                }
+              }}
+              className="px-4 py-2 text-sm bg-violet-600 text-white rounded-md hover:bg-violet-700 disabled:opacity-50"
+            >
+              {extracting ? 'Extrayendo…' : '✦ Extraer desde post original'}
+            </button>
+
+            {extractError && (
+              <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                {extractError}
+              </div>
+            )}
+
+            {extractProposal && (
+              <div className="border border-violet-200 rounded-lg overflow-hidden">
+                <div className="bg-violet-50 px-4 py-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-violet-800">
+                    Propuesta extraída · confianza {Math.round(extractProposal.confidence * 100)}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setExtractProposal(null)}
+                    className="text-violet-400 hover:text-violet-600 text-sm"
+                  >✕</button>
+                </div>
+                <div className="p-4 space-y-1 text-xs text-gray-700">
+                  {extractProposal.title         && <div><span className="font-medium">Título:</span> {extractProposal.title}</div>}
+                  {extractProposal.contentType   && <div><span className="font-medium">Tipo:</span> {extractProposal.contentType}</div>}
+                  {extractProposal.franchise     && <div><span className="font-medium">Franquicia:</span> {extractProposal.franchise}</div>}
+                  {extractProposal.publisher     && <div><span className="font-medium">Editorial:</span> {extractProposal.publisher}</div>}
+                  {extractProposal.summary       && <div><span className="font-medium">Resumen:</span> {extractProposal.summary}</div>}
+                  {extractProposal.characters?.length > 0 && <div><span className="font-medium">Personajes:</span> {extractProposal.characters.join(', ')}</div>}
+                  {extractProposal.creators?.length > 0   && <div><span className="font-medium">Creadores:</span> {extractProposal.creators.map((c: any) => `${c.name} (${c.role})`).join(', ')}</div>}
+                  {extractProposal.representationTags?.length > 0 && <div><span className="font-medium">Rep. tags:</span> {extractProposal.representationTags.join(', ')}</div>}
+                  {extractProposal.themeTags?.length > 0  && <div><span className="font-medium">Temáticas:</span> {extractProposal.themeTags.join(', ')}</div>}
+                  {extractProposal.buyLink       && <div><span className="font-medium">Buy link:</span> {extractProposal.buyLink}</div>}
+                </div>
+                <div className="border-t border-violet-200 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = extractProposal
+                      update({
+                        ...(p.title                         ? { title: p.title }                                                                               : {}),
+                        ...(p.contentType                   ? { contentType: p.contentType as ContentType }                                                    : {}),
+                        ...(p.summary                       ? { summary: p.summary }                                                                           : {}),
+                        ...(p.franchise                     ? { franchise: p.franchise }                                                                       : {}),
+                        ...(p.publisher                     ? { publisher: p.publisher }                                                                       : {}),
+                        ...(p.characters?.length            ? { characters: p.characters.join(', ') }                                                         : {}),
+                        ...(p.creators?.length              ? { creators: p.creators.map((c: any) => ({ role: c.role as CreatorRole, name: c.name })) }       : {}),
+                        ...(p.representationTags?.length    ? { representationTags: p.representationTags.join(', ') }                                         : {}),
+                        ...(p.themeTags?.length             ? { themeTags: p.themeTags.join(', ') }                                                           : {}),
+                        ...(p.buyLink                       ? { buyLink: p.buyLink }                                                                           : {}),
+                      })
+                      setExtractProposal(null)
+                    }}
+                    className="w-full px-4 py-2 text-sm bg-violet-600 text-white rounded-md hover:bg-violet-700"
+                  >
+                    Aplicar todos los campos →
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Section>
       )}
 
       {/* Research Assistant — create mode only */}
@@ -690,13 +784,29 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label="URL del post original">
-              <input
-                type="url"
-                value={form.sourcePostUrl}
-                onChange={e => update({ sourcePostUrl: e.target.value })}
-                disabled={mode === 'edit'}
-                className={INPUT_CLASS}
-              />
+              {mode === 'edit' && form.sourcePostUrl ? (
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="flex-1 px-3 py-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-md truncate">
+                    {form.sourcePostUrl}
+                  </span>
+                  <a
+                    href={form.sourcePostUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 px-3 py-2 text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-100"
+                  >
+                    Abrir →
+                  </a>
+                </div>
+              ) : (
+                <input
+                  type="url"
+                  value={form.sourcePostUrl}
+                  onChange={e => update({ sourcePostUrl: e.target.value })}
+                  disabled={mode === 'edit'}
+                  className={INPUT_CLASS}
+                />
+              )}
             </Field>
             <Field label="ID del post original">
               <input

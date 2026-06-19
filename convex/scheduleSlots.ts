@@ -162,9 +162,10 @@ export const getReadySlotsInternal = internalQuery({
 // Fetches all data needed for calendar generation in a single query
 export const getDataForGenerationInternal = internalQuery({
   args: {
-    startDate: v.string(),
-    endDate: v.string(),
-    channel: channelV,
+    startDate:       v.string(),
+    endDate:         v.string(),
+    channel:         channelV,
+    selectedItemIds: v.optional(v.array(v.id('contentItems'))),
   },
   handler: async (ctx, args) => {
     // Scoring rules for this channel
@@ -193,10 +194,34 @@ export const getDataForGenerationInternal = internalQuery({
 
     // Fetch content items for those scores; filter to approved/published
     const allItems: Doc<'contentItems'>[] = []
+    const inPool = new Set<string>()
     for (const score of topScores) {
       const item = await ctx.db.get(score.contentItemId)
       if (item && (item.status === 'approved' || item.status === 'published')) {
         allItems.push(item)
+        inPool.add(item._id as string)
+      }
+    }
+
+    // When explicit selection given: also fetch selected items that may rank below top-300
+    // (new imported items always start with reuseScore=0 and may not appear in topScores)
+    if (args.selectedItemIds && args.selectedItemIds.length > 0) {
+      for (const id of args.selectedItemIds) {
+        if (inPool.has(id as string)) continue
+        const item = await ctx.db.get(id)
+        if (item && (item.status === 'approved' || item.status === 'published')) {
+          allItems.push(item)
+          inPool.add(id as string)
+          // Also fetch their channelScore so the scoreMap is complete
+          const score = await ctx.db
+            .query('channelScores')
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .withIndex('by_item_and_channel', (q: any) =>
+              q.eq('contentItemId', id).eq('channel', args.channel)
+            )
+            .first()
+          if (score) topScores.push(score)
+        }
       }
     }
 
@@ -206,7 +231,7 @@ export const getDataForGenerationInternal = internalQuery({
       .withIndex('by_channel_and_status', q =>
         q.eq('channel', args.channel).eq('status', 'approved')
       )
-      .take(500)
+      .collect()
 
     // Recent publications for topic fatigue (most recent 200 for this channel)
     const recentPubs = await ctx.db
@@ -229,6 +254,7 @@ export const clearUnlockedInRangeInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     const dates = getDatesInRange(args.startDate, args.endDate)
+    let deleted = 0
     for (const date of dates) {
       const slots = await ctx.db
         .query('scheduleSlots')
@@ -237,9 +263,16 @@ export const clearUnlockedInRangeInternal = internalMutation({
       for (const slot of slots) {
         if (!slot.locked) {
           await ctx.db.delete(slot._id)
+          deleted++
         }
       }
     }
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType:  'scheduleSlot',
+      entityId:    undefined,
+      eventType:   'calendar.slots_cleared',
+      payloadJson: { startDate: args.startDate, endDate: args.endDate, channel: args.channel, deleted },
+    })
   },
 })
 
@@ -378,6 +411,21 @@ export const updateStatusInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.id, { status: args.status })
+  },
+})
+
+export const deleteAfterPublishInternal = internalMutation({
+  args: { id: v.id('scheduleSlots') },
+  handler: async (ctx, args) => {
+    const slot = await ctx.db.get(args.id)
+    if (!slot) return
+    await ctx.db.delete(args.id)
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'scheduleSlot',
+      entityId: args.id,
+      eventType: 'slot.deleted_after_publish',
+      payloadJson: { channel: slot.channel, scheduledFor: slot.scheduledFor },
+    })
   },
 })
 

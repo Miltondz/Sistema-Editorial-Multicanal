@@ -40,7 +40,6 @@ export default function CalendarGenerateModal({ channel, startDate, endDate, gen
   const [search,        setSearch]        = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [typeFilter,    setTypeFilter]    = useState<string>('all')
-  const [channelFilter, setChannelFilter] = useState<'tumblr' | 'x' | 'all'>(channel)
   const [selected,      setSelected]      = useState<Set<string>>(new Set())
   const searchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -53,7 +52,7 @@ export default function CalendarGenerateModal({ channel, startDate, endDate, gen
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const items = useQuery(api.contentItems.listApprovedForCalendar as any, {
     contentType: typeFilter === 'all' ? undefined : typeFilter,
-    channel:     channelFilter === 'all' ? undefined : channelFilter,
+    channel,
     search:      debouncedSearch.trim() || undefined,
   })
 
@@ -127,16 +126,6 @@ export default function CalendarGenerateModal({ channel, startDate, endDate, gen
                 <option key={v} value={v}>{l}</option>
               ))}
             </select>
-            <select
-              value={channelFilter}
-              onChange={e => setChannelFilter(e.target.value as 'tumblr' | 'x' | 'all')}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-            >
-              <option value="all">Todos los canales</option>
-              <option value="tumblr">Tumblr</option>
-              <option value="x">X / Twitter</option>
-            </select>
-
             {/* Select all visible */}
             <button
               type="button"

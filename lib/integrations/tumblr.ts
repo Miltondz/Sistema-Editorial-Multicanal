@@ -26,6 +26,10 @@ export interface TumblrPost {
   url?: string          // link posts
   title?: string        // link / text posts
   description?: string  // link posts
+  // Present on reblogs — undefined/null on original posts
+  reblogged_from_id?:   string | null
+  reblogged_root_id?:   string | null
+  reblogged_from_name?: string | null
 }
 
 const TUMBLR_PAGE_SIZE = 20
@@ -38,7 +42,7 @@ export async function fetchOnePage(
   { beforeMs, limit = TUMBLR_PAGE_SIZE }: { beforeMs?: number; limit?: number }
 ): Promise<{ posts: TumblrPost[]; totalPosts: number }> {
   const client = createTumblrClient()
-  const params: Record<string, unknown> = { limit, reblog_info: false, notes_info: false }
+  const params: Record<string, unknown> = { limit, reblog_info: true, notes_info: false }
   if (beforeMs !== undefined) params.before = Math.floor(beforeMs / 1000) // API expects Unix seconds
   const response = await client.blogPosts(blogName, params)
   return {

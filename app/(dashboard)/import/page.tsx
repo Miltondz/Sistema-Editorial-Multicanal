@@ -66,6 +66,7 @@ export default function ImportPage() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [downloadImages, setDownloadImages] = useState(false)
+  const [skipReblogs,    setSkipReblogs]    = useState(true)
 
   const [blogInfo, setBlogInfo]         = useState<{ totalPosts: number; newestTs?: number; oldestTs?: number } | null>(null)
   const [blogInfoLoading, setBlogInfoLoading] = useState(false)
@@ -110,6 +111,7 @@ export default function ImportPage() {
         afterDate:      continueFromLast ? undefined : (afterDate  || undefined),
         continueFromLast,
         downloadImages,
+        skipReblogs,
       })
     } catch (err) {
       setTumblrError(err instanceof Error ? err.message : 'Error desconocido')
@@ -291,6 +293,30 @@ export default function ImportPage() {
                   </p>
                 )}
 
+                {/* Skip reblogs toggle */}
+                <div
+                  className={`flex items-center justify-between rounded-xl px-4 py-3 border cursor-pointer transition-all ${
+                    skipReblogs
+                      ? 'border-indigo-500/40 bg-indigo-500/10'
+                      : 'border-slate-700 bg-slate-800/50'
+                  }`}
+                  onClick={() => !isRunning && setSkipReblogs(v => !v)}
+                >
+                  <div>
+                    <p className={`text-sm font-semibold ${skipReblogs ? 'text-indigo-300' : 'text-slate-300'}`}>
+                      {skipReblogs ? '✦ Solo posts originales' : '♻ Incluir reblogs'}
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {skipReblogs
+                        ? 'Omite reblogs de otros blogs — solo importa contenido propio'
+                        : 'Importa todos los posts incluyendo reblogs'}
+                    </p>
+                  </div>
+                  <div className={`w-10 h-5 rounded-full transition-colors relative shrink-0 ml-3 ${skipReblogs ? 'bg-indigo-500' : 'bg-slate-600'}`}>
+                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${skipReblogs ? 'left-5' : 'left-0.5'}`} />
+                  </div>
+                </div>
+
                 {/* Image mode toggle */}
                 <div
                   className={`flex items-center justify-between rounded-xl px-4 py-3 border cursor-pointer transition-all ${
@@ -392,7 +418,7 @@ export default function ImportPage() {
         </div>
 
         {/* ── Imported items browser ── */}
-        <ImportedItemsBrowser />
+        <ImportedItemsBrowser jobs={jobs} />
 
         {/* ── Job history ── */}
         {jobs !== undefined && (jobs as any[]).length > 0 && (
@@ -457,49 +483,360 @@ function ActiveJobCard({ job }: { job: any }) {
   )
 }
 
-// ── Imported items browser ────────────────────────────────────────────────────
+// ── Item row ──────────────────────────────────────────────────────────────────
 
-function ImportedItemsBrowser() {
-  const [platform, setPlatform] = useState<'all' | 'tumblr' | 'x'>('all')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'in_review' | 'approved'>('all')
-  const [approving, setApproving] = useState<string | null>(null)
+function ItemRow({ item, approving, deleting, onApprove, onDelete }: {
+  item: any
+  approving: string | null
+  deleting: string | null
+  onApprove: (id: string) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const resetTimer = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const statusCfg = ITEM_STATUS_CONFIG[item.status] ?? { label: item.status, cls: 'bg-gray-100 text-gray-500' }
+  const canApprove = ['draft', 'in_review', 'researching'].includes(item.status)
+  const isDeleting = deleting === item._id
 
+  async function handleDeleteClick() {
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      resetTimer.current = setTimeout(() => setConfirmDelete(false), 4000)
+      return
+    }
+    if (resetTimer.current) clearTimeout(resetTimer.current)
+    setConfirmDelete(false)
+    try {
+      await onDelete(item._id)
+    } catch (err) {
+      console.error('[deleteItem] error:', err)
+    }
+  }
+
+  return (
+    <div className="px-5 py-4 flex items-start gap-4 hover:bg-slate-800/40 transition-colors group">
+      <div className="shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center text-base">
+        {item.coverImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={item.coverImageUrl} alt=""
+            className="w-full h-full object-cover"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+          />
+        ) : (
+          item.sourcePlatform === 'tumblr' ? '📷' : item.sourcePlatform === 'x' ? '𝕏' : '•'
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center flex-wrap gap-2 mb-1.5">
+          <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${statusCfg.cls}`}>
+            {statusCfg.label}
+          </span>
+          {item.needsReview && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-medium">
+              Revisar
+            </span>
+          )}
+          {item.sourceDate && (
+            <span className="text-[10px] text-slate-500 ml-auto">{fmtDate(item.sourceDate)}</span>
+          )}
+        </div>
+        <p className="text-sm font-semibold text-slate-100 truncate leading-snug">{item.title}</p>
+        {item.summary && (
+          <p className="text-xs text-slate-500 mt-1 line-clamp-1 leading-relaxed">{item.summary}</p>
+        )}
+      </div>
+
+      <div className="shrink-0 flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1.5">
+          {item.sourcePostUrl && (
+            <a
+              href={item.sourcePostUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-8 h-8 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs transition-colors"
+              title="Ver post original"
+            >
+              ↗
+            </a>
+          )}
+          <Link
+            href={`/catalog/${item._id}`}
+            className="h-8 px-3 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium flex items-center transition-colors"
+          >
+            Editar
+          </Link>
+          {canApprove && (
+            <button
+              type="button"
+              onClick={() => onApprove(item._id)}
+              disabled={approving === item._id || isDeleting}
+              className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-50 transition-colors flex items-center gap-1"
+            >
+              {approving === item._id ? <><Spinner /> …</> : '✓ Aprobar'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleDeleteClick}
+            disabled={isDeleting}
+            className={`h-8 px-3 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 disabled:opacity-50 ${
+              confirmDelete
+                ? 'bg-red-600 hover:bg-red-500 text-white'
+                : 'border border-slate-700 bg-slate-800 hover:bg-red-900/40 hover:border-red-700/50 text-slate-400 hover:text-red-300'
+            }`}
+            title="Eliminar ítem"
+          >
+            {isDeleting ? <><Spinner /> …</> : confirmDelete ? '¿Confirmar?' : '✕'}
+          </button>
+        </div>
+        {confirmDelete && (
+          <p className="text-[10px] text-amber-400 animate-pulse whitespace-nowrap">Clic para confirmar · 4s</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Job items section ─────────────────────────────────────────────────────────
+// One collapsible card per import job — has its own paginated query.
+
+function JobItemsSection({ job, statusFilter, approving, deleting, onApprove, onDelete, onDeleteJob }: {
+  job: any
+  statusFilter: 'all' | 'in_review' | 'approved'
+  approving: string | null
+  deleting: string | null
+  onApprove: (id: string) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+  onDeleteJob: (jobId: string, count: number) => Promise<{ deleted: number } | void>
+}) {
+  const [open, setOpen] = useState(true)
+  const [confirmJobDelete, setConfirmJobDelete] = useState(false)
+  const [jobDeleting, setJobDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deletingJobRecord, setDeletingJobRecord] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const resetTimer = useRef<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const deleteJobMutation = useMutation((api.importJobs as any).deleteJob)
   const { results, status, loadMore } = usePaginatedQuery(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    api.contentItems.list as any,
-    { contentOrigin: 'imported' },
-    { initialNumItems: 30 }
+    api.contentItems.listByImportJob as any,
+    { importJobId: job._id },
+    { initialNumItems: 10 }
   )
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const approveItem = useMutation(api.contentItems.approve as any)
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const filtered = (results as any[]).filter((i: any) => {
-    if (platform !== 'all' && i.sourcePlatform !== platform) return false
-    if (statusFilter !== 'all' && i.status !== statusFilter) return false
+  const items = (results as any[]).filter((item: any) => {
+    if (statusFilter !== 'all' && item.status !== statusFilter) return false
     return true
   })
+
+  const cfg = JOB_STATUS_CONFIG[job.status] ?? JOB_STATUS_CONFIG.pending
+  const sourceLabel = job.source === 'tumblr' ? '📷 Tumblr' : '𝕏 X'
+  const startDate = job.startedAt ? fmtDateTime(job.startedAt) : fmtDate(job._creationTime)
+  const totalInJob = job.itemsImported ?? 0
+
+  async function handleDeleteJob() {
+    if (!confirmJobDelete) {
+      setConfirmJobDelete(true)
+      setDeleteError(null)
+      resetTimer.current = setTimeout(() => setConfirmJobDelete(false), 4000)
+      return
+    }
+    if (resetTimer.current) clearTimeout(resetTimer.current)
+    setConfirmJobDelete(false)
+    setJobDeleting(true)
+    setDeleteError(null)
+    try {
+      const result = await onDeleteJob(job._id, totalInJob)
+      if (result && (result as any).deleted === 0) {
+        setDeleteError('No se encontraron ítems con este lote (ya eliminados o sin coincidencia).')
+      }
+    } catch (err) {
+      console.error('[bulkDeleteByImportJob] error:', err)
+      setDeleteError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setJobDeleting(false)
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 overflow-hidden">
+      {/* Job header */}
+      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-800/60">
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="flex-1 flex items-center gap-3 text-left"
+        >
+          <span className={`w-2 h-2 rounded-full shrink-0 ${cfg.dot}`} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold text-slate-100">{sourceLabel}</span>
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${cfg.pill}`}>{cfg.label}</span>
+              <span className="text-xs text-slate-500">{startDate}</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {totalInJob.toLocaleString()} importados
+              {job.itemsFailed > 0 && <span className="text-red-400 ml-2">{job.itemsFailed} fallidos</span>}
+            </p>
+          </div>
+          <span className="text-slate-500 text-xs shrink-0 select-none">{open ? '▴' : '▾'}</span>
+        </button>
+
+        {/* Batch delete for this job */}
+        {totalInJob > 0 && (
+          <div className="shrink-0 flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={handleDeleteJob}
+              disabled={jobDeleting}
+              className={`h-8 px-3 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 disabled:opacity-50 ${
+                confirmJobDelete
+                  ? 'bg-red-600 hover:bg-red-500 text-white ring-2 ring-red-400 ring-offset-1 ring-offset-slate-900'
+                  : 'border border-slate-700 hover:border-red-700/50 bg-slate-800 hover:bg-red-900/30 text-slate-400 hover:text-red-300'
+              }`}
+              title={`Eliminar todos los ítems de este lote (${totalInJob})`}
+            >
+              {jobDeleting
+                ? <><Spinner /> Eliminando…</>
+                : confirmJobDelete
+                  ? `⚠ Confirmar — borrar ${totalInJob} ítems`
+                  : `✕ Eliminar lote (${totalInJob})`}
+            </button>
+            {confirmJobDelete && (
+              <p className="text-[10px] text-amber-400 animate-pulse">Clic de nuevo para confirmar · se cancela en 4s</p>
+            )}
+            {deleteError && (
+              <p className="text-xs text-red-400 max-w-[280px] text-right leading-snug">{deleteError}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {open && (
+        <>
+          {status === 'LoadingFirstPage' ? (
+            <div className="px-5 py-8 flex justify-center">
+              <Spinner />
+            </div>
+          ) : items.length === 0 ? (
+            <div className="px-5 py-6 text-center flex flex-col items-center gap-3">
+              <p className="text-slate-500 text-sm">
+                {status === 'Exhausted' ? 'Lote vacío — todos los ítems eliminados.' : 'Sin items con este filtro'}
+              </p>
+              {status === 'Exhausted' && (
+                <button
+                  type="button"
+                  disabled={deletingJobRecord}
+                  onClick={async () => {
+                    setDeletingJobRecord(true)
+                    try {
+                      await deleteJobMutation({ id: job._id })
+                    } catch (err) {
+                      setDeleteError(err instanceof Error ? err.message : String(err))
+                    } finally {
+                      setDeletingJobRecord(false)
+                    }
+                  }}
+                  className="px-4 py-2 rounded-lg bg-red-900/40 hover:bg-red-800/60 border border-red-800/50 text-red-300 text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {deletingJobRecord ? <><Spinner /> Eliminando registro…</> : '✕ Eliminar registro de lote'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-800/60">
+              {items.map((item: any) => (
+                <ItemRow
+                  key={item._id}
+                  item={item}
+                  approving={approving}
+                  deleting={deleting}
+                  onApprove={onApprove}
+                  onDelete={onDelete}
+                />
+              ))}
+              {status === 'CanLoadMore' && (
+                <div className="px-5 py-3 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => loadMore(10)}
+                    className="text-sm text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+                  >
+                    Cargar 10 más ↓
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── Imported items browser ────────────────────────────────────────────────────
+
+function ImportedItemsBrowser({ jobs }: { jobs: any[] | undefined }) {
+  const [platformFilter, setPlatformFilter] = useState<'all' | 'tumblr' | 'x'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'in_review' | 'approved'>('all')
+  const [approving, setApproving] = useState<string | null>(null)
+  const [deleting,  setDeleting]  = useState<string | null>(null)
+  const [deleteItemError, setDeleteItemError] = useState<string | null>(null)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const approveItem         = useMutation(api.contentItems.approve as any)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const deleteItem          = useMutation(api.contentItems.deleteItem as any)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const deleteByJob         = useMutation(api.contentItems.bulkDeleteByImportJob as any)
 
   async function handleApprove(id: string) {
     setApproving(id)
     try { await approveItem({ id }) } finally { setApproving(null) }
   }
 
+  async function handleDelete(id: string) {
+    setDeleting(id)
+    setDeleteItemError(null)
+    try {
+      await deleteItem({ id })
+    } catch (err) {
+      console.error('[deleteItem] error:', err)
+      setDeleteItemError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeleting(null)
+    }
+  }
+
+  async function handleDeleteJob(jobId: string, _count: number) {
+    return await deleteByJob({ importJobId: jobId })
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const filteredJobs = (jobs ?? []).filter((job: any) => {
+    if (platformFilter === 'tumblr' && job.source !== 'tumblr') return false
+    if (platformFilter === 'x' && job.source !== 'x_export') return false
+    return true
+  })
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Posts importados</h2>
-        <span className="text-xs text-slate-600">
-          {status === 'LoadingFirstPage' ? '' : `${filtered.length}${status === 'CanLoadMore' ? '+' : ''}`}
-        </span>
+        {jobs !== undefined && (
+          <span className="text-xs text-slate-600">{filteredJobs.length} lote{filteredJobs.length !== 1 ? 's' : ''}</span>
+        )}
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <TabGroup
-          value={platform}
-          onChange={v => setPlatform(v as typeof platform)}
+          value={platformFilter}
+          onChange={v => setPlatformFilter(v as typeof platformFilter)}
           options={[
             { value: 'all',    label: 'Todos' },
             { value: 'tumblr', label: '📷 Tumblr' },
@@ -515,105 +852,40 @@ function ImportedItemsBrowser() {
             { value: 'approved',  label: 'Aprobados' },
           ]}
         />
+        {deleteItemError && (
+          <div className="w-full px-4 py-2 rounded-xl bg-red-950/50 border border-red-900/60 text-sm text-red-300">
+            Error al eliminar ítem: {deleteItemError}
+          </div>
+        )}
       </div>
 
-      {/* List */}
-      {status === 'LoadingFirstPage' ? (
+      {jobs === undefined ? (
         <div className="rounded-2xl border border-slate-800 bg-slate-900 py-16 text-center">
           <div className="flex flex-col items-center gap-2">
             <Spinner />
             <p className="text-slate-400 text-sm">Cargando…</p>
           </div>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : filteredJobs.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-900/50 py-16 text-center">
           <p className="text-2xl mb-2">📭</p>
-          <p className="text-slate-400 text-sm font-medium">Sin posts con este filtro</p>
+          <p className="text-slate-400 text-sm font-medium">Sin lotes de importación</p>
           <p className="text-slate-600 text-xs mt-1">Inicia una importación para poblar el catálogo</p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 divide-y divide-slate-800/60 overflow-hidden">
-          {filtered.map((item: any) => {
-            const statusCfg = ITEM_STATUS_CONFIG[item.status] ?? { label: item.status, cls: 'bg-gray-100 text-gray-500' }
-            const canApprove = ['draft', 'in_review', 'researching'].includes(item.status)
-            return (
-              <div key={item._id} className="px-5 py-4 flex items-start gap-4 hover:bg-slate-800/40 transition-colors group">
-                {/* Platform dot */}
-                <div className="shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center text-base">
-                  {item.coverImageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={item.coverImageUrl} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    item.sourcePlatform === 'tumblr' ? '📷' : item.sourcePlatform === 'x' ? '𝕏' : '•'
-                  )}
-                </div>
-
-                {/* Content */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center flex-wrap gap-2 mb-1.5">
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${statusCfg.cls}`}>
-                      {statusCfg.label}
-                    </span>
-                    {item.needsReview && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-medium">
-                        Revisar
-                      </span>
-                    )}
-                    {item.sourceDate && (
-                      <span className="text-[10px] text-slate-500 ml-auto">{fmtDate(item.sourceDate)}</span>
-                    )}
-                  </div>
-                  <p className="text-sm font-semibold text-slate-100 truncate leading-snug">{item.title}</p>
-                  {item.summary && (
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-1 leading-relaxed">{item.summary}</p>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="shrink-0 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {item.sourcePostUrl && (
-                    <a
-                      href={item.sourcePostUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-8 h-8 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-xs transition-colors"
-                      title="Ver post original"
-                    >
-                      ↗
-                    </a>
-                  )}
-                  <Link
-                    href={`/catalog/${item._id}`}
-                    className="h-8 px-3 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium flex items-center transition-colors"
-                  >
-                    Editar
-                  </Link>
-                  {canApprove && (
-                    <button
-                      type="button"
-                      onClick={() => handleApprove(item._id)}
-                      disabled={approving === item._id}
-                      className="h-8 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold disabled:opacity-50 transition-colors flex items-center gap-1"
-                    >
-                      {approving === item._id ? <><Spinner /> …</> : '✓ Aprobar'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-
-          {status === 'CanLoadMore' && (
-            <div className="px-5 py-4 flex justify-center">
-              <button
-                type="button"
-                onClick={() => loadMore(20)}
-                className="text-sm text-indigo-400 hover:text-indigo-300 font-medium transition-colors flex items-center gap-1.5"
-              >
-                Cargar 20 más ↓
-              </button>
-            </div>
-          )}
+        <div className="space-y-3">
+          {filteredJobs.map((job: any) => (
+            <JobItemsSection
+              key={job._id}
+              job={job}
+              statusFilter={statusFilter}
+              approving={approving}
+              deleting={deleting}
+              onApprove={handleApprove}
+              onDelete={handleDelete}
+              onDeleteJob={handleDeleteJob}
+            />
+          ))}
         </div>
       )}
     </div>

@@ -73,7 +73,7 @@ export const generateCalendar = action({
     // Single internal query fetches all data needed
     const data = await ctx.runQuery(
       internal.scheduleSlots.getDataForGenerationInternal,
-      { startDate: effectiveStart, endDate: args.endDate, channel: args.channel }
+      { startDate: effectiveStart, endDate: args.endDate, channel: args.channel, selectedItemIds: args.selectedItemIds }
     )
 
     const { rules, slotsInRange, topScores, allItems, approvedVariants, recentPubs } = data as {
@@ -95,6 +95,28 @@ export const generateCalendar = action({
     const variantMap = new Map<string, Doc<'contentVariants'>>()
     for (const variant of approvedVariants) {
       if (variant.isActive) variantMap.set(variant.contentItemId as string, variant)
+    }
+
+    // DIAGNOSTIC — check Convex dashboard logs to debug 0-slots issue
+    console.log('[generateCalendar] DIAG', {
+      channel: args.channel,
+      allItemsCount: allItems.length,
+      approvedVariantsCount: approvedVariants.length,
+      variantMapSize: variantMap.size,
+      selectedItemIds: args.selectedItemIds?.length ?? 0,
+      topScoresCount: topScores.length,
+    })
+    if (allItems.length > 0) {
+      const first = allItems[0]
+      const fId = first._id as string
+      console.log('[generateCalendar] DIAG first item', {
+        id: fId,
+        title: first.title,
+        status: first.status,
+        inSelectedSet: args.selectedItemIds ? args.selectedItemIds.includes(fId as any) : 'no selection',
+        hasVariantInMap: variantMap.has(fId),
+        variantMapKeys: [...variantMap.keys()].slice(0, 3),
+      })
     }
 
     // Locked slot keys — these are never overwritten
@@ -135,16 +157,24 @@ export const generateCalendar = action({
       ? new Set(args.selectedItemIds.map(id => id as string))
       : null
 
+    console.log('[generateCalendar] DIAG selectedSet', {
+      size: selectedSet?.size ?? 'null',
+      firstFew: selectedSet ? [...selectedSet].slice(0, 3) : [],
+    })
+
     const eligible: Candidate[] = []
+    let dbgSkippedBySelection = 0, dbgSkippedByVariant = 0, dbgSkippedByCooldown = 0, dbgSkippedByFatigue = 0
     for (const item of allItems) {
       const itemId = item._id as string
-      if (selectedSet && !selectedSet.has(itemId)) continue
+      if (selectedSet && !selectedSet.has(itemId)) { dbgSkippedBySelection++; continue }
       const variant = variantMap.get(itemId)
-      if (!variant) continue
+      if (!variant) { dbgSkippedByVariant++; continue }
 
       const score = scoreMap.get(itemId)
-      if (score?.lastPostedAt && now - score.lastPostedAt < cooldownItemMs) continue
-      if (item.topicFatigueGroup && fatigueGroups.has(item.topicFatigueGroup)) continue
+      const inSelectedSet = selectedSet?.has(itemId) ?? false
+      // Cooldown skipped for explicitly selected items — manual selection overrides auto-scheduling
+      if (!inSelectedSet && score?.lastPostedAt && now - score.lastPostedAt < cooldownItemMs) { dbgSkippedByCooldown++; continue }
+      if (!inSelectedSet && item.topicFatigueGroup && fatigueGroups.has(item.topicFatigueGroup)) { dbgSkippedByFatigue++; continue }
 
       eligible.push({
         itemId:     item._id,
@@ -156,6 +186,13 @@ export const generateCalendar = action({
       })
     }
     eligible.sort((a, b) => b.reuseScore - a.reuseScore)
+    console.log('[generateCalendar] DIAG eligible', {
+      eligible: eligible.length,
+      skippedBySelection: dbgSkippedBySelection,
+      skippedByVariant: dbgSkippedByVariant,
+      skippedByCooldown: dbgSkippedByCooldown,
+      skippedByFatigue: dbgSkippedByFatigue,
+    })
 
     // Clear non-locked slots in range (full month range — removes stale past slots)
     if (overwrite) {

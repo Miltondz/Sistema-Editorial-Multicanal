@@ -172,3 +172,36 @@ export const completeInternal = internalMutation({
     })
   },
 })
+
+export const deleteIfEmptyInternal = internalMutation({
+  args: { id: v.id('importJobs') },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.id)
+    if (!job || job.itemsImported > 0) return
+    await ctx.db.delete(args.id)
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'importJob',
+      entityId: args.id,
+      eventType: 'import.deleted_empty',
+      payloadJson: {},
+    })
+  },
+})
+
+export const deleteJob = mutation({
+  args: { id: v.id('importJobs') },
+  handler: async (ctx, args): Promise<void> => {
+    const remaining = await ctx.db
+      .query('contentItems')
+      .filter(q => q.eq(q.field('importJobId'), args.id))
+      .first()
+    if (remaining) throw new Error('El lote aún tiene ítems. Elimínalos primero.')
+    await ctx.db.delete(args.id)
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'importJob',
+      entityId: args.id,
+      eventType: 'import.deleted',
+      payloadJson: {},
+    })
+  },
+})

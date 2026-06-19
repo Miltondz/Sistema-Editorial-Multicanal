@@ -2,6 +2,7 @@
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import { useState, useEffect } from 'react'
+import { BannerSettingsForm } from '@/components/dashboard/BannerSettingsForm'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,11 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
+      {/* ── Banner editorial ─────────────────────────────────── */}
+      <div className="mb-8">
+        <BannerSettingsForm />
+      </div>
+
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Configuración de scoring</h1>
         <p className="text-sm text-gray-500 mt-1">

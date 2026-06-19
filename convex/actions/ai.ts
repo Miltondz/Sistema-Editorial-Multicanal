@@ -278,6 +278,99 @@ Return ONLY this JSON (no markdown, no extra text):
   },
 })
 
+// ── extractFromHistoric ───────────────────────────────────────────────────────
+
+export const extractFromHistoric = action({
+  args: { contentItemId: v.id('contentItems') },
+  handler: async (ctx, args): Promise<{
+    title: string
+    contentType: string
+    summary: string
+    franchise: string
+    publisher: string
+    characters: string[]
+    creators: Array<{ role: string; name: string }>
+    representationTags: string[]
+    themeTags: string[]
+    buyLink: string
+    confidence: number
+  }> => {
+    const item = await ctx.runQuery(internal.contentItems.getByIdInternal, {
+      id: args.contentItemId,
+    }) as any | null
+    if (!item) throw new Error('Item not found')
+    if (item.contentOrigin !== 'imported') throw new Error('extractFromHistoric only available for imported items')
+
+    const rawText = [item.longDescription, item.summary].filter(Boolean).join('\n\n')
+    if (!rawText.trim()) throw new Error('Item has no source text to extract from')
+
+    const userMessage = `Extract structured catalog metadata from this historical blog post text.
+The blog is SuperheroesInColor — it covers racial, ethnic, and cultural diversity in comics and pop culture.
+
+SOURCE TEXT:
+"""
+${rawText.slice(0, 6000)}
+"""
+
+RULES:
+- Extract only what is actually present in the text. Do not invent.
+- title: clean formatted title. Comics: "Series #Issue (Year)". Books/films: "Title (Year)". Cosplay: "Character #Cosplay by Name".
+- contentType: one of comic / libro / autor / cosplay / articulo / poster / pelicula / personaje / coleccion
+- summary: 2-3 clean editorial sentences (English). Name actual identities — do not use the word "diverse".
+- franchise: parent universe or series (e.g. "X-Men", "Black Panther"). Empty string if none.
+- publisher: publisher name (Marvel, DC, Image, etc.). Empty string if unknown.
+- characters: array of character names explicitly mentioned.
+- creators: array of {role, name}. role = one of writer / artist / cover_artist / colorist / photographer / other.
+- representationTags: specific identity tags (Black, Latina, queer, trans, Indigenous, etc.). Max 8. Lowercase.
+- themeTags: thematic tags (identity, legacy, afrofuturism, etc.). Max 6. Lowercase.
+- buyLink: any purchase/store URL found in the text. Empty string if none.
+- confidence: 0.0–1.0. How confident you are in the extraction given the available text.
+
+Return ONLY valid JSON, no markdown:
+{
+  "title": "",
+  "contentType": "",
+  "summary": "",
+  "franchise": "",
+  "publisher": "",
+  "characters": [],
+  "creators": [],
+  "representationTags": [],
+  "themeTags": [],
+  "buyLink": "",
+  "confidence": 0.0
+}`
+
+    let rawResponse: string
+    try {
+      rawResponse = await complete(SYSTEM_PROMPT_BASE, userMessage, 1200)
+    } catch (err) {
+      throw new Error(`OpenRouter error: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    let parsed: any
+    try {
+      parsed = parseJsonSafe<any>(rawResponse)
+    } catch {
+      throw new Error(`AI returned non-JSON: ${rawResponse.slice(0, 200)}`)
+    }
+
+    return {
+      title:              String(parsed.title              ?? ''),
+      contentType:        String(parsed.contentType        ?? ''),
+      summary:            String(parsed.summary            ?? ''),
+      franchise:          String(parsed.franchise          ?? ''),
+      publisher:          String(parsed.publisher          ?? ''),
+      characters:         Array.isArray(parsed.characters)         ? parsed.characters         : [],
+      creators:           Array.isArray(parsed.creators)           ? parsed.creators           : [],
+      representationTags: Array.isArray(parsed.representationTags) ? parsed.representationTags : [],
+      themeTags:          Array.isArray(parsed.themeTags)          ? parsed.themeTags          : [],
+      buyLink:            String(parsed.buyLink            ?? ''),
+      confidence:         typeof parsed.confidence === 'number'    ? parsed.confidence         : 0,
+    }
+  },
+})
+
 // ── suggestTags ──────────────────────────────────────────────────────────────
 
 export const suggestTags = action({

@@ -17,6 +17,7 @@ export const processTumblrBatch = internalAction({
     cursorTs:       v.number(),
     afterTs:        v.optional(v.number()),
     downloadImages: v.optional(v.boolean()),
+    skipReblogs:    v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<void> => {
     const blogName = process.env.TUMBLR_BLOG_NAME
@@ -42,14 +43,25 @@ export const processTumblrBatch = internalAction({
     }
 
     if (posts.length === 0) {
-      await ctx.runMutation(internal.importJobs.completeInternal, { id: args.jobId, status: 'completed' })
+      // No posts found — delete job if nothing was imported yet (avoids empty job clutter)
+      const isFirstBatch = (job.itemsImported ?? 0) === 0
+      if (isFirstBatch) {
+        await ctx.runMutation(internal.importJobs.deleteIfEmptyInternal, { id: args.jobId })
+      } else {
+        await ctx.runMutation(internal.importJobs.completeInternal, { id: args.jobId, status: 'completed' })
+      }
       return
     }
 
-    // Filter: only import posts within the date range
-    const filtered = args.afterTs
+    // Filter: date range
+    const dateFiltered = args.afterTs
       ? posts.filter(p => p.timestamp * 1000 >= args.afterTs!)
       : posts
+
+    // Filter: skip reblogs (reblogged_from_id is set on all reblogs)
+    const filtered = args.skipReblogs
+      ? dateFiltered.filter(p => !p.reblogged_from_id)
+      : dateFiltered
 
     // Did this page reach the afterTs boundary?
     const hitAfterBound = args.afterTs !== undefined &&
@@ -67,16 +79,15 @@ export const processTumblrBatch = internalAction({
         sourceDate:     n.sourceDate,
       }))
 
-      const result: { imported: number; skipped: number; newIds: string[]; errors: any[] } =
-        await ctx.runMutation(internal.contentItems.importBatchInternal, { items: normalized })
+      const result: { imported: number; skipped: number; newItems: { id: string; sourcePostId: string }[]; errors: any[] } =
+        await ctx.runMutation(internal.contentItems.importBatchInternal, { importJobId: args.jobId, items: normalized })
 
       // If downloadImages=true, fetch & store each cover image in Convex storage
-      if (args.downloadImages && result.newIds.length > 0) {
+      if (args.downloadImages && result.newItems.length > 0) {
+        const idBySourcePostId = new Map(result.newItems.map(n => [n.sourcePostId, n.id]))
         const withImages = filtered.map(normalizeTumblrPost).filter(n => n.coverImageUrl)
         for (const norm of withImages) {
-          const itemId = result.newIds.find((_id, i) =>
-            normalized[i]?.sourcePostId === norm.sourcePostId
-          )
+          const itemId = idBySourcePostId.get(norm.sourcePostId)
           if (!itemId || !norm.coverImageUrl) continue
           try {
             const imgRes = await fetch(norm.coverImageUrl)
@@ -126,6 +137,7 @@ export const processTumblrBatch = internalAction({
       cursorTs:       oldestTs,
       afterTs:        args.afterTs,
       downloadImages: args.downloadImages,
+      skipReblogs:    args.skipReblogs,
     })
   },
 })
@@ -144,6 +156,7 @@ export const startTumblrImport = action({
     afterDate:        v.optional(v.string()),
     continueFromLast: v.optional(v.boolean()),
     downloadImages:   v.optional(v.boolean()),
+    skipReblogs:      v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{ jobId: string }> => {
     const blogName = process.env.TUMBLR_BLOG_NAME
@@ -168,7 +181,7 @@ export const startTumblrImport = action({
 
     const jobId: string = await ctx.runMutation(internal.importJobs.createInternal, {
       source:     'tumblr',
-      configJson: { beforeTs, afterTs, cursorTs: beforeTs, downloadImages: args.downloadImages ?? false },
+      configJson: { beforeTs, afterTs, cursorTs: beforeTs, downloadImages: args.downloadImages ?? false, skipReblogs: args.skipReblogs ?? false },
     })
 
     // Schedule first batch immediately
@@ -177,6 +190,7 @@ export const startTumblrImport = action({
       cursorTs:       beforeTs,
       afterTs,
       downloadImages: args.downloadImages,
+      skipReblogs:    args.skipReblogs,
     })
 
     return { jobId }
@@ -292,7 +306,7 @@ export const processXExport = action({
       }))
 
       const result: { imported: number; skipped: number; errors: any[] } =
-        await ctx.runMutation(internal.contentItems.importBatchInternal, { items: normalized })
+        await ctx.runMutation(internal.contentItems.importBatchInternal, { importJobId: jobId as any, items: normalized })
 
       imported += result.imported
       skipped  += result.skipped

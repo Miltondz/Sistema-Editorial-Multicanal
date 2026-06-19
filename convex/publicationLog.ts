@@ -76,6 +76,55 @@ export const getXWriteCountThisMonth = query({
   },
 })
 
+export const getTumblrWriteCountThisMonth = query({
+  args: {},
+  handler: async (ctx) => {
+    const startOfMonth = new Date()
+    startOfMonth.setUTCDate(1)
+    startOfMonth.setUTCHours(0, 0, 0, 0)
+    const posts = await ctx.db
+      .query('publicationLog')
+      .withIndex('by_channel', q => q.eq('channel', 'tumblr'))
+      .order('desc')
+      .take(1000)
+    return posts.filter(p =>
+      p.publishStatus === 'success' &&
+      p._creationTime >= startOfMonth.getTime()
+    ).length
+  },
+})
+
+// Publications grouped by date for calendar heatmap (last 365 days)
+export const getCalendarData = query({
+  args: {},
+  handler: async (ctx): Promise<Array<{ date: string; tumblr: number; x: number; total: number }>> => {
+    const since = Date.now() - 365 * 24 * 60 * 60 * 1000
+    const logs = await ctx.db
+      .query('publicationLog')
+      .withIndex('by_status', q => q.eq('publishStatus', 'success'))
+      .order('desc')
+      .take(2000)
+
+    const byDate = new Map<string, { tumblr: number; x: number }>()
+    for (const log of logs) {
+      if (log._creationTime < since) continue
+      const d = new Date(log._creationTime)
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+      const entry = byDate.get(key) ?? { tumblr: 0, x: 0 }
+      if (log.channel === 'tumblr') entry.tumblr++
+      else if (log.channel === 'x') entry.x++
+      byDate.set(key, entry)
+    }
+
+    return [...byDate.entries()].map(([date, counts]) => ({
+      date,
+      tumblr: counts.tumblr,
+      x: counts.x,
+      total: counts.tumblr + counts.x,
+    }))
+  },
+})
+
 // Public query: recent successful publications for dashboard
 export const listRecent = query({
   args: {
@@ -103,10 +152,27 @@ export const listRecent = query({
     const enriched = []
     for (const log of successful) {
       const item = log.contentItemId ? await ctx.db.get(log.contentItemId) : null
+      let coverImageUrl = item?.coverImageUrl ?? null
+      if (!coverImageUrl && log.contentItemId) {
+        const primaryAsset = await ctx.db
+          .query('mediaAssets')
+          .withIndex('by_item', q => q.eq('contentItemId', log.contentItemId!))
+          .filter(q => q.eq(q.field('isPrimary'), true))
+          .first()
+        coverImageUrl = primaryAsset?.publicUrl ?? null
+        if (!coverImageUrl) {
+          const anyAsset = await ctx.db
+            .query('mediaAssets')
+            .withIndex('by_item', q => q.eq('contentItemId', log.contentItemId!))
+            .first()
+          coverImageUrl = anyAsset?.publicUrl ?? null
+        }
+      }
       enriched.push({
         ...log,
         itemTitle: item?.title ?? null,
         itemType: item?.contentType ?? null,
+        coverImageUrl,
       })
     }
     return enriched

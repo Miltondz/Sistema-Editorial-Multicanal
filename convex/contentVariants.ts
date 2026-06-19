@@ -123,9 +123,22 @@ export const approve = mutation({
       throw new Error(`Cannot approve variant with status: ${variant.status}`)
     }
 
+    // Deactivate any other active variant for this item+channel before activating this one
+    if (!variant.isActive) {
+      const currentActive = await ctx.db
+        .query('contentVariants')
+        .withIndex('by_item_and_channel', q =>
+          q.eq('contentItemId', variant.contentItemId).eq('channel', variant.channel)
+        )
+        .filter(q => q.eq(q.field('isActive'), true))
+        .first()
+      if (currentActive) await ctx.db.patch(currentActive._id, { isActive: false })
+    }
+
     await ctx.db.patch(args.id, {
       status: 'approved',
       approvedAt: Date.now(),
+      isActive: true,
     })
 
     // Auto-approve the parent content item if it's still in a pre-approved state.

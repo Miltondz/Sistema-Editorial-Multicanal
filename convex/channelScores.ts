@@ -72,7 +72,7 @@ export const recomputeForChannelInternal = internalMutation({
     const allScores = await ctx.db
       .query('channelScores')
       .withIndex('by_channel_and_score', q => q.eq('channel', args.channel))
-      .take(1000)
+      .collect()
 
     let updated = 0
     for (const score of allScores) {

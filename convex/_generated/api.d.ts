@@ -9,15 +9,19 @@
  */
 
 import type * as actions_ai from "../actions/ai.js";
+import type * as actions_comicsResearch from "../actions/comicsResearch.js";
 import type * as actions_importer from "../actions/importer.js";
 import type * as actions_publisher from "../actions/publisher.js";
 import type * as actions_scoring from "../actions/scoring.js";
+import type * as actions_specialDates from "../actions/specialDates.js";
 import type * as auditEvents from "../auditEvents.js";
 import type * as auth from "../auth.js";
 import type * as channelScores from "../channelScores.js";
+import type * as comicsResearch from "../comicsResearch.js";
 import type * as contentItems from "../contentItems.js";
 import type * as contentVariants from "../contentVariants.js";
 import type * as crons from "../crons.js";
+import type * as editorialBanner from "../editorialBanner.js";
 import type * as http from "../http.js";
 import type * as importJobs from "../importJobs.js";
 import type * as mediaAssets from "../mediaAssets.js";
@@ -28,6 +32,7 @@ import type * as scheduled_metricsCron from "../scheduled/metricsCron.js";
 import type * as scheduled_publishCron from "../scheduled/publishCron.js";
 import type * as scheduled_scoringCron from "../scheduled/scoringCron.js";
 import type * as scoringRules from "../scoringRules.js";
+import type * as specialDates from "../specialDates.js";
 
 import type {
   ApiFromModules,
@@ -37,15 +42,19 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "actions/ai": typeof actions_ai;
+  "actions/comicsResearch": typeof actions_comicsResearch;
   "actions/importer": typeof actions_importer;
   "actions/publisher": typeof actions_publisher;
   "actions/scoring": typeof actions_scoring;
+  "actions/specialDates": typeof actions_specialDates;
   auditEvents: typeof auditEvents;
   auth: typeof auth;
   channelScores: typeof channelScores;
+  comicsResearch: typeof comicsResearch;
   contentItems: typeof contentItems;
   contentVariants: typeof contentVariants;
   crons: typeof crons;
+  editorialBanner: typeof editorialBanner;
   http: typeof http;
   importJobs: typeof importJobs;
   mediaAssets: typeof mediaAssets;
@@ -56,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   "scheduled/publishCron": typeof scheduled_publishCron;
   "scheduled/scoringCron": typeof scheduled_scoringCron;
   scoringRules: typeof scoringRules;
+  specialDates: typeof specialDates;
 }>;
 
 /**

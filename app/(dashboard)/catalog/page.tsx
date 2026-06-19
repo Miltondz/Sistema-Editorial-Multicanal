@@ -17,14 +17,15 @@ const INITIAL_FILTERS: FilterState = {
   needsReview: undefined,
 }
 
-type BulkAction = 'approve' | 'evergreen_high' | 'evergreen_low' | 'priority_5' | 'mark_enriched'
+type BulkAction = 'approve' | 'evergreen_high' | 'evergreen_low' | 'priority_5' | 'mark_enriched' | 'delete'
 
-const BULK_ACTIONS: { value: BulkAction; label: string }[] = [
+const BULK_ACTIONS: { value: BulkAction; label: string; danger?: boolean }[] = [
   { value: 'approve',        label: 'Aprobar selección' },
   { value: 'evergreen_high', label: 'Evergreen: alto' },
   { value: 'evergreen_low',  label: 'Evergreen: bajo' },
   { value: 'priority_5',     label: 'Prioridad 5' },
   { value: 'mark_enriched',  label: 'Marcar enriquecido' },
+  { value: 'delete',         label: 'Eliminar selección', danger: true },
 ]
 
 export default function CatalogPage() {
@@ -53,6 +54,10 @@ export default function CatalogPage() {
   const bulkApprove = useMutation((api.contentItems as any).bulkApprove)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const bulkUpdate  = useMutation((api.contentItems as any).bulkUpdate)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const deleteItem  = useMutation((api.contentItems as any).deleteItem)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bulkDelete  = useMutation((api.contentItems as any).bulkDeleteItems)
 
   function handleToggleSelect(id: string) {
     setSelectedIds(prev => {
@@ -73,6 +78,17 @@ export default function CatalogPage() {
     try {
       const res = await bulkApprove({ ids: [id as any] })
       setBulkResult(res.approved === 1 ? 'Aprobado.' : 'No se pudo aprobar (estado inválido).')
+    } catch (err) {
+      setBulkResult(`Error: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  async function handleInlineDelete(id: string) {
+    setBulkResult(null)
+    try {
+      await deleteItem({ id: id as any })
+      setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n })
+      setBulkResult('Ítem eliminado.')
     } catch (err) {
       setBulkResult(`Error: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -99,6 +115,9 @@ export default function CatalogPage() {
       } else if (action === 'mark_enriched') {
         const res = await bulkUpdate({ ids, patch: { enrichedManually: true } })
         setBulkResult(`${res.updated} marcados como enriquecidos.`)
+      } else if (action === 'delete') {
+        const res = await bulkDelete({ ids })
+        setBulkResult(`${res.deleted} ítems eliminados.${res.skipped > 0 ? ` (${res.skipped} no encontrados)` : ''}`)
       }
       setSelectedIds(new Set())
     } catch (err) {
@@ -138,7 +157,11 @@ export default function CatalogPage() {
               type="button"
               disabled={bulkLoading}
               onClick={() => handleBulkAction(a.value)}
-              className="px-3 py-1.5 text-xs font-medium bg-white border border-indigo-300 text-indigo-700 rounded hover:bg-indigo-50 disabled:opacity-50"
+              className={`px-3 py-1.5 text-xs font-medium rounded disabled:opacity-50 border ${
+                a.danger
+                  ? 'bg-white border-red-300 text-red-600 hover:bg-red-50'
+                  : 'bg-white border-indigo-300 text-indigo-700 hover:bg-indigo-50'
+              }`}
             >
               {a.label}
             </button>
@@ -174,6 +197,7 @@ export default function CatalogPage() {
           onToggleSelect={handleToggleSelect}
           onToggleAll={handleToggleAll}
           onApprove={handleInlineApprove}
+          onDelete={handleInlineDelete}
         />
       </div>
     </div>

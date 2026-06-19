@@ -1,4 +1,5 @@
 import { query, mutation, internalQuery, internalMutation } from './_generated/server'
+import { internal } from './_generated/api'
 import { v } from 'convex/values'
 
 export const generateUploadUrl = mutation({
@@ -43,13 +44,15 @@ export const saveMediaAsset = mutation({
       .withIndex('by_item', q => q.eq('contentItemId', args.contentItemId))
       .collect()
 
-    return await ctx.db.insert('mediaAssets', {
+    const willBePrimary = args.isPrimary ?? count.length === 0
+
+    const assetId = await ctx.db.insert('mediaAssets', {
       contentItemId: args.contentItemId,
       storageId: args.storageId,
       publicUrl: url,
       mimeType: args.mimeType,
       altText: args.altText,
-      isPrimary: args.isPrimary ?? count.length === 0,
+      isPrimary: willBePrimary,
       sortOrder: count.length,
       width: args.width,
       height: args.height,
@@ -57,6 +60,18 @@ export const saveMediaAsset = mutation({
       sourceUrl: args.sourceUrl,
       sourceKind: args.sourceKind,
     })
+
+    if (willBePrimary) {
+      await ctx.db.patch(args.contentItemId, { coverImageUrl: url })
+    }
+
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'mediaAsset',
+      entityId: assetId,
+      eventType: 'mediaAsset.created',
+      payloadJson: { contentItemId: args.contentItemId, mimeType: args.mimeType },
+    })
+    return assetId
   },
 })
 
@@ -77,6 +92,33 @@ export const deleteAsset = mutation({
     if (!asset) throw new Error('Asset not found')
     await ctx.storage.delete(asset.storageId)
     await ctx.db.delete(args.id)
+
+    if (asset.isPrimary) {
+      const remaining = await ctx.db
+        .query('mediaAssets')
+        .withIndex('by_item', q => q.eq('contentItemId', asset.contentItemId))
+        .collect()
+      const next = remaining[0]
+      if (next) {
+        await ctx.db.patch(next._id, { isPrimary: true })
+        await ctx.db.patch(asset.contentItemId, { coverImageUrl: next.publicUrl })
+        await ctx.runMutation(internal.auditEvents.log, {
+          entityType: 'mediaAsset',
+          entityId:   next._id,
+          eventType:  'mediaAsset.promotedToPrimary',
+          payloadJson: { contentItemId: asset.contentItemId, reason: 'previous_primary_deleted' },
+        })
+      } else {
+        await ctx.db.patch(asset.contentItemId, { coverImageUrl: undefined })
+      }
+    }
+
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'mediaAsset',
+      entityId: args.id,
+      eventType: 'mediaAsset.deleted',
+      payloadJson: { contentItemId: asset.contentItemId, storageId: asset.storageId },
+    })
   },
 })
 
@@ -106,19 +148,24 @@ export const saveForImportInternal = internalMutation({
       .query('mediaAssets')
       .withIndex('by_item', q => q.eq('contentItemId', args.contentItemId))
       .collect()
-    return await ctx.db.insert('mediaAssets', {
+    const isFirst = count.length === 0
+    const assetId = await ctx.db.insert('mediaAssets', {
       contentItemId: args.contentItemId,
       storageId:     args.storageId,
       publicUrl:     args.publicUrl,
       mimeType:      args.mimeType,
       sourceUrl:     args.sourceUrl,
       sourceKind:    'tumblr_import',
-      isPrimary:     count.length === 0,
+      isPrimary:     isFirst,
       sortOrder:     count.length,
       width:         args.width,
       height:        args.height,
       fileSizeBytes: args.fileSizeBytes,
     })
+    if (isFirst) {
+      await ctx.db.patch(args.contentItemId, { coverImageUrl: args.publicUrl })
+    }
+    return assetId
   },
 })
 
@@ -133,7 +180,46 @@ export const setPrimary = mutation({
       .withIndex('by_item', q => q.eq('contentItemId', args.contentItemId))
       .collect()
     for (const asset of existing) {
-      await ctx.db.patch(asset._id, { isPrimary: asset._id === args.id })
+      const shouldBePrimary = asset._id === args.id
+      if (asset.isPrimary !== shouldBePrimary) {
+        await ctx.db.patch(asset._id, { isPrimary: shouldBePrimary })
+      }
     }
+    const newPrimary = existing.find(a => a._id === args.id)
+    if (newPrimary) {
+      await ctx.db.patch(args.contentItemId, { coverImageUrl: newPrimary.publicUrl })
+    }
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'mediaAsset',
+      entityId: args.id,
+      eventType: 'mediaAsset.setPrimary',
+      payloadJson: { contentItemId: args.contentItemId },
+    })
+  },
+})
+
+export const listAll = query({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query('mediaAssets')
+      .order('desc')
+      .take(args.limit ?? 200)
+  },
+})
+
+export const getStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query('mediaAssets').collect()
+    const totalCount = all.length
+    const totalSizeBytes = all.reduce((s, a) => s + (a.fileSizeBytes ?? 0), 0)
+    const byMimeType: Record<string, number> = {}
+    for (const a of all) {
+      const key = a.mimeType.split('/')[0] // 'image', 'video', etc.
+      byMimeType[key] = (byMimeType[key] ?? 0) + 1
+    }
+    const primaryCount = all.filter(a => a.isPrimary).length
+    return { totalCount, totalSizeBytes, byMimeType, primaryCount }
   },
 })

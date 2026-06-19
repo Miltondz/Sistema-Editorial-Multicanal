@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import { useState } from 'react'
 import { OriginBadge } from './OriginBadge'
 import type { ContentItem, ContentStatus } from '@/lib/types/domain'
 
@@ -14,6 +15,7 @@ interface CatalogTableProps {
   onToggleSelect?: (id: string) => void
   onToggleAll?: (checked: boolean) => void
   onApprove?: (id: string) => void
+  onDelete?: (id: string) => void
 }
 
 const STATUS_LABELS: Record<ContentStatus, string> = {
@@ -50,9 +52,26 @@ const TYPE_LABELS: Record<string, string> = {
   coleccion: 'Colección',
 }
 
+function DeleteButton({ id, onDelete }: { id: string; onDelete: (id: string) => void }) {
+  const [confirm, setConfirm] = useState(false)
+  return (
+    <button
+      onClick={() => { if (confirm) { onDelete(id) } else { setConfirm(true) } }}
+      onBlur={() => setConfirm(false)}
+      className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
+        confirm
+          ? 'bg-red-600 text-white hover:bg-red-500'
+          : 'bg-red-50 text-red-600 hover:bg-red-100'
+      }`}
+    >
+      {confirm ? '¿Eliminar?' : '✕ Eliminar'}
+    </button>
+  )
+}
+
 export function CatalogTable({
   items, isLoading, onLoadMore, canLoadMore,
-  selectedIds, onToggleSelect, onToggleAll, onApprove,
+  selectedIds, onToggleSelect, onToggleAll, onApprove, onDelete,
 }: CatalogTableProps) {
   const hasCheckboxes = Boolean(onToggleSelect)
   const allSelected = items.length > 0 && selectedIds != null && items.every(i => selectedIds.has(i._id as string))
@@ -166,6 +185,9 @@ export function CatalogTable({
                       <Link href={`/catalog/${id}`} className="text-sm text-indigo-600 hover:text-indigo-900 font-medium">
                         Editar
                       </Link>
+                      {onDelete && (
+                        <DeleteButton id={id} onDelete={onDelete} />
+                      )}
                     </div>
                   </td>
                 </tr>

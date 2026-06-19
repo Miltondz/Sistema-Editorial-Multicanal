@@ -176,11 +176,11 @@ export const listApprovedForCalendar = query({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       items = await ctx.db.query('contentItems').withSearchIndex('search_title', (q: any) =>
         q.search('title', args.search!).eq('status', 'approved')
-      ).take(200)
+      ).take(500)
     } else {
       items = await ctx.db.query('contentItems')
         .withIndex('by_status', q => q.eq('status', 'approved'))
-        .take(500)
+        .take(1000)
     }
 
     const result: Array<{ itemId: string; title: string; contentType: string; coverImageUrl?: string; channels: Array<'tumblr' | 'x'> }> = []
@@ -189,7 +189,7 @@ export const listApprovedForCalendar = query({
       if (args.contentType && item.contentType !== args.contentType) continue
       const variants = await ctx.db.query('contentVariants')
         .withIndex('by_item', q => q.eq('contentItemId', item._id))
-        .take(10)
+        .collect()
 
       const channels = new Set<'tumblr' | 'x'>()
       for (const v of variants) {
@@ -221,9 +221,25 @@ export const listNeedsReview = query({
   },
 })
 
+export const listByImportJob = query({
+  args: {
+    importJobId: v.id('importJobs'),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query('contentItems')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .withIndex('by_import_job', (q: any) => q.eq('importJobId', args.importJobId))
+      .order('desc')
+      .paginate(args.paginationOpts)
+  },
+})
+
 // Batch import from importer action — skips duplicates instead of throwing
 export const importBatchInternal = internalMutation({
   args: {
+    importJobId: v.optional(v.id('importJobs')),
     items: v.array(v.object({
       title:          v.string(),
       summary:        v.optional(v.string()),
@@ -237,14 +253,14 @@ export const importBatchInternal = internalMutation({
   },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: async (ctx: any, args: any): Promise<{
-    imported: number
-    skipped:  number
-    newIds:   string[]
-    errors:   Array<{ sourceId: string; title: string; error: string }>
+    imported:  number
+    skipped:   number
+    newItems:  Array<{ id: string; sourcePostId: string }>
+    errors:    Array<{ sourceId: string; title: string; error: string }>
   }> => {
     let imported = 0
     let skipped  = 0
-    const newIds: string[] = []
+    const newItems: Array<{ id: string; sourcePostId: string }> = []
     const errors: Array<{ sourceId: string; title: string; error: string }> = []
 
     for (const item of args.items) {
@@ -288,6 +304,7 @@ export const importBatchInternal = internalMutation({
           sourcePostUrl:   item.sourcePostUrl,
           sourceDate:      item.sourceDate,
           coverImageUrl:   item.coverImageUrl,
+          importJobId:     args.importJobId,
           enrichedManually: false,
           needsReview:     true,
           status:          'in_review',
@@ -309,7 +326,7 @@ export const importBatchInternal = internalMutation({
           payloadJson: { contentOrigin: 'imported', sourcePlatform: item.sourcePlatform },
         })
 
-        newIds.push(itemId)
+        newItems.push({ id: itemId, sourcePostId: item.sourcePostId })
         imported++
       } catch (err) {
         errors.push({
@@ -320,7 +337,7 @@ export const importBatchInternal = internalMutation({
       }
     }
 
-    return { imported, skipped, newIds, errors }
+    return { imported, skipped, newItems, errors }
   },
 })
 
@@ -598,6 +615,203 @@ export const bulkUpdate = mutation({
   },
 })
 
+// ── DELETE (hard delete — for test cleanup and correcting erroneous imports) ──
+
+export const deleteItem = mutation({
+  args: { id: v.id('contentItems') },
+  handler: async (ctx, args): Promise<void> => {
+    const item = await ctx.db.get(args.id)
+    if (!item) throw new Error('Item not found')
+
+    // Clear any schedule slots referencing this item
+    const slots = await ctx.db
+      .query('scheduleSlots')
+      .withIndex('by_content_item', q => q.eq('contentItemId', args.id))
+      .collect()
+    for (const slot of slots) {
+      if (!slot.locked) {
+        await ctx.db.patch(slot._id, { contentItemId: undefined, variantId: undefined, status: 'empty' })
+      }
+    }
+
+    // Delete variants
+    const variants = await ctx.db
+      .query('contentVariants')
+      .withIndex('by_item', q => q.eq('contentItemId', args.id))
+      .collect()
+    for (const v of variants) await ctx.db.delete(v._id)
+
+    // Delete channel scores
+    const scores = await ctx.db
+      .query('channelScores')
+      .withIndex('by_item', q => q.eq('contentItemId', args.id))
+      .collect()
+    for (const s of scores) await ctx.db.delete(s._id)
+
+    // Delete media asset records (storage blobs remain — manual cleanup if needed)
+    const assets = await ctx.db
+      .query('mediaAssets')
+      .withIndex('by_item', q => q.eq('contentItemId', args.id))
+      .collect()
+    for (const a of assets) await ctx.db.delete(a._id)
+
+    await ctx.db.delete(args.id)
+
+    await ctx.runMutation(internal.auditEvents.log, {
+      entityType: 'contentItem',
+      entityId: args.id,
+      eventType: 'item.deleted',
+      payloadJson: { title: item.title, status: item.status, contentOrigin: item.contentOrigin },
+    })
+  },
+})
+
+export const bulkDeleteByImportJob = mutation({
+  args: { importJobId: v.id('importJobs') },
+  handler: async (ctx, args): Promise<{ deleted: number }> => {
+    // Use filter instead of index — more robust if index deployment is pending
+    const items = await ctx.db
+      .query('contentItems')
+      .filter(q => q.eq(q.field('importJobId'), args.importJobId))
+      .collect()
+
+    let deleted = 0
+    for (const item of items) {
+      const slots = await ctx.db
+        .query('scheduleSlots')
+        .withIndex('by_content_item', q => q.eq('contentItemId', item._id))
+        .collect()
+      for (const slot of slots) {
+        if (!slot.locked) {
+          await ctx.db.patch(slot._id, { contentItemId: undefined, variantId: undefined, status: 'empty' })
+        }
+      }
+      const variants = await ctx.db.query('contentVariants').withIndex('by_item', q => q.eq('contentItemId', item._id)).collect()
+      for (const v of variants) await ctx.db.delete(v._id)
+      const scores = await ctx.db.query('channelScores').withIndex('by_item', q => q.eq('contentItemId', item._id)).collect()
+      for (const s of scores) await ctx.db.delete(s._id)
+      const assets = await ctx.db.query('mediaAssets').withIndex('by_item', q => q.eq('contentItemId', item._id)).collect()
+      for (const a of assets) await ctx.db.delete(a._id)
+      await ctx.db.delete(item._id)
+      deleted++
+    }
+    if (deleted > 0) {
+      await ctx.runMutation(internal.auditEvents.log, {
+        entityType: 'contentItem',
+        entityId: undefined,
+        eventType: 'item.deleted',
+        payloadJson: { importJobId: args.importJobId, bulk: true, deleted },
+      })
+    }
+    return { deleted }
+  },
+})
+
+export const bulkDeleteItems = mutation({
+  args: { ids: v.array(v.id('contentItems')) },
+  handler: async (ctx, args): Promise<{ deleted: number; skipped: number }> => {
+    let deleted = 0
+    let skipped = 0
+    for (const id of args.ids) {
+      const item = await ctx.db.get(id)
+      if (!item) { skipped++; continue }
+
+      const slots = await ctx.db
+        .query('scheduleSlots')
+        .withIndex('by_content_item', q => q.eq('contentItemId', id))
+        .collect()
+      for (const slot of slots) {
+        if (!slot.locked) {
+          await ctx.db.patch(slot._id, { contentItemId: undefined, variantId: undefined, status: 'empty' })
+        }
+      }
+
+      const variants = await ctx.db
+        .query('contentVariants')
+        .withIndex('by_item', q => q.eq('contentItemId', id))
+        .collect()
+      for (const v of variants) await ctx.db.delete(v._id)
+
+      const scores = await ctx.db
+        .query('channelScores')
+        .withIndex('by_item', q => q.eq('contentItemId', id))
+        .collect()
+      for (const s of scores) await ctx.db.delete(s._id)
+
+      const assets = await ctx.db
+        .query('mediaAssets')
+        .withIndex('by_item', q => q.eq('contentItemId', id))
+        .collect()
+      for (const a of assets) await ctx.db.delete(a._id)
+
+      await ctx.db.delete(id)
+      await ctx.runMutation(internal.auditEvents.log, {
+        entityType: 'contentItem',
+        entityId: id,
+        eventType: 'item.deleted',
+        payloadJson: { title: item.title, bulk: true },
+      })
+      deleted++
+    }
+    return { deleted, skipped }
+  },
+})
+
+// One-shot migration: assigns each orphan imported item to the correct job
+// by matching its sourceDate against each job's configJson date range.
+// Items without sourceDate or outside all ranges go to the fallback job (largest by itemsImported).
+// Run via: npx convex run contentItems:backfillAllJobsPublic
+export const backfillAllJobsPublic = mutation({
+  args: {},
+  handler: async (ctx): Promise<{ patched: number; unmatched: number; byJob: Record<string, number> }> => {
+    // Load all import jobs with date ranges
+    const jobs = await ctx.db.query('importJobs').collect()
+    const jobRanges = jobs
+      .filter(j => j.configJson?.afterTs !== undefined || j.configJson?.beforeTs !== undefined)
+      .map(j => ({
+        id: j._id,
+        afterTs:  (j.configJson?.afterTs  ?? 0)              as number,
+        beforeTs: (j.configJson?.beforeTs ?? Date.now())     as number,
+        imported: j.itemsImported ?? 0,
+      }))
+      .sort((a, b) => a.afterTs - b.afterTs)
+
+    const fallbackJob = [...jobs].sort((a, b) => (b.itemsImported ?? 0) - (a.itemsImported ?? 0))[0]
+
+    // Load all orphan imported items (no importJobId)
+    const orphans = await ctx.db
+      .query('contentItems')
+      .withIndex('by_origin', q => q.eq('contentOrigin', 'imported'))
+      .filter(q => q.eq(q.field('importJobId'), undefined))
+      .collect()
+
+    const byJob: Record<string, number> = {}
+    let unmatched = 0
+
+    for (const item of orphans) {
+      const ts = item.sourceDate ?? item.importedAt
+      let matched = ts !== undefined
+        ? jobRanges.find(r => ts >= r.afterTs && ts <= r.beforeTs)
+        : undefined
+
+      // If no range match, try ±7 days tolerance (edge posts may fall just outside)
+      if (!matched && ts !== undefined) {
+        const tolerance = 7 * 24 * 3600 * 1000
+        matched = jobRanges.find(r => ts >= r.afterTs - tolerance && ts <= r.beforeTs + tolerance)
+      }
+
+      const targetId = matched?.id ?? fallbackJob?._id
+      if (!targetId) { unmatched++; continue }
+
+      await ctx.db.patch(item._id, { importJobId: targetId })
+      const key = targetId.toString()
+      byJob[key] = (byJob[key] ?? 0) + 1
+    }
+
+    return { patched: orphans.length - unmatched, unmatched, byJob }
+  },
+})
+
 // Pending-approvals count for planner banner
 // Counts active variants in 'generated' or 'edited' status (need approval before publish)
 // plus items in 'draft' or 'in_review' (need editorial review)
@@ -606,10 +820,10 @@ export const countByStatus = query({
   handler: async (ctx) => {
     // Variants awaiting approval (generated or edited, not yet approved)
     const [genTumblr, genX, editTumblr, editX] = await Promise.all([
-      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'tumblr').eq('status', 'generated')).take(500),
-      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'x').eq('status', 'generated')).take(500),
-      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'tumblr').eq('status', 'edited')).take(500),
-      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'x').eq('status', 'edited')).take(500),
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'tumblr').eq('status', 'generated')).collect(),
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'x').eq('status', 'generated')).collect(),
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'tumblr').eq('status', 'edited')).collect(),
+      ctx.db.query('contentVariants').withIndex('by_channel_and_status', q => q.eq('channel', 'x').eq('status', 'edited')).collect(),
     ])
     // Distinct items with unapproved active variants
     const pendingItems = new Set<string>()
@@ -619,8 +833,8 @@ export const countByStatus = query({
 
     // Items needing editorial review (imported or manual draft)
     const [inReview, draft] = await Promise.all([
-      ctx.db.query('contentItems').withIndex('by_status', q => q.eq('status', 'in_review')).take(500),
-      ctx.db.query('contentItems').withIndex('by_status', q => q.eq('status', 'draft')).take(500),
+      ctx.db.query('contentItems').withIndex('by_status', q => q.eq('status', 'in_review')).collect(),
+      ctx.db.query('contentItems').withIndex('by_status', q => q.eq('status', 'draft')).collect(),
     ])
 
     return {
@@ -636,22 +850,85 @@ export const countByStatus = query({
 export const getDashboardStats = query({
   args: {},
   handler: async (ctx) => {
+    const now = Date.now()
+    const weekAnchor = new Date(now)
+    weekAnchor.setUTCHours(0, 0, 0, 0)
+    const dow = weekAnchor.getUTCDay()
+    weekAnchor.setUTCDate(weekAnchor.getUTCDate() - (dow === 0 ? 6 : dow - 1))
+    const startOfWeek = weekAnchor.getTime()
+    const startOfMonth = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), 1)
+
     const needsReview = await ctx.db
       .query('contentItems')
       .withIndex('by_needs_review', q => q.eq('needsReview', true))
+      .collect()
+
+    // Approvals this week via audit log
+    const approvalEvents = await ctx.db
+      .query('auditEvents')
+      .withIndex('by_event_type', q => q.eq('eventType', 'item.approved'))
+      .order('desc')
       .take(500)
-    const approved = await ctx.db
+    const approvedCount = approvalEvents.filter(e => e._creationTime >= startOfWeek).length
+
+    // Scheduled: planned + ready slots
+    const plannedSlots = await ctx.db
+      .query('scheduleSlots')
+      .withIndex('by_status', q => q.eq('status', 'planned'))
+      .collect()
+    const readySlots = await ctx.db
+      .query('scheduleSlots')
+      .withIndex('by_status', q => q.eq('status', 'ready'))
+      .collect()
+    const scheduledCount = plannedSlots.length + readySlots.length
+
+    // Publications this month via publicationLog
+    const pubLogs = await ctx.db
+      .query('publicationLog')
+      .withIndex('by_status', q => q.eq('publishStatus', 'success'))
+      .order('desc')
+      .take(500)
+    const publishedCount = pubLogs.filter(l => l._creationTime >= startOfMonth).length
+
+    return { needsReviewCount: needsReview.length, approvedCount, scheduledCount, publishedCount }
+  },
+})
+
+export const getDashboardSparklines = query({
+  args: {},
+  handler: async (ctx): Promise<{ review: number[]; approved: number[]; published: number[] }> => {
+    const days: number[] = Array.from({ length: 10 }, (_, i) => {
+      const d = new Date()
+      d.setUTCHours(0, 0, 0, 0)
+      d.setUTCDate(d.getUTCDate() - (9 - i))
+      return d.getTime()
+    })
+    const nextDay = (ts: number) => ts + 86400000
+
+    const pubLogs = await ctx.db
+      .query('publicationLog')
+      .withIndex('by_status', q => q.eq('publishStatus', 'success'))
+      .order('desc')
+      .take(500)
+
+    const published = days.map(dayStart =>
+      pubLogs.filter(l => l._creationTime >= dayStart && l._creationTime < nextDay(dayStart)).length
+    )
+    const approved = days.map(dayStart =>
+      pubLogs.filter(l =>
+        l._creationTime >= dayStart &&
+        l._creationTime < nextDay(dayStart) &&
+        l.channel === 'tumblr'
+      ).length
+    )
+
+    const reviewItems = await ctx.db
       .query('contentItems')
-      .withIndex('by_status', q => q.eq('status', 'approved'))
-      .take(500)
-    const published = await ctx.db
-      .query('contentItems')
-      .withIndex('by_status', q => q.eq('status', 'published'))
-      .take(500)
-    return {
-      needsReviewCount: needsReview.length,
-      approvedCount:    approved.length,
-      publishedCount:   published.length,
-    }
+      .withIndex('by_needs_review', q => q.eq('needsReview', true))
+      .collect()
+    const reviewCount = reviewItems.length
+    const review = days.map(() => reviewCount)
+
+    return { review, approved, published }
   },
 })

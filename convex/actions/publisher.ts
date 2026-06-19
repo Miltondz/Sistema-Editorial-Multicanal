@@ -15,6 +15,7 @@ interface ItemDoc {
   representationTags: string[]
   themeTags: string[]
   buyLink?: string
+  coverImageUrl?: string
 }
 interface VariantDoc {
   _id: any
@@ -46,10 +47,16 @@ function stripHtml(html: string): string {
 
 function buildTumblrPayload(
   variant: { headline?: string; bodyText?: string; ctaText?: string },
-  item: { contentType: string; representationTags: string[]; themeTags: string[]; buyLink?: string },
+  item: { contentType: string; representationTags: string[]; themeTags: string[]; buyLink?: string; coverImageUrl?: string },
   mediaAssets: Array<{ publicUrl: string }>
 ) {
-  const hasImages = mediaAssets.length > 0
+  // Fall back to coverImageUrl when no mediaAsset record exists (URL-reference import mode)
+  const effectiveAssets = mediaAssets.length > 0
+    ? mediaAssets
+    : item.coverImageUrl
+      ? [{ publicUrl: item.coverImageUrl }]
+      : []
+  const hasImages = effectiveAssets.length > 0
   const postType = selectPostType(hasImages, !!item.buyLink)
 
   const headline = variant.headline ?? ''
@@ -73,7 +80,7 @@ function buildTumblrPayload(
     type: postType,
     caption:         postType === 'photo' ? fullCaption : undefined,
     body:            postType === 'text'  ? fullCaption : undefined,
-    imageUrls:       postType === 'photo' ? mediaAssets.map(a => a.publicUrl).slice(0, 1) : undefined,
+    imageUrls:       postType === 'photo' ? effectiveAssets.map(a => a.publicUrl).slice(0, 1) : undefined,
     linkUrl:         postType === 'link'  ? item.buyLink ?? undefined : undefined,
     linkTitle:       postType === 'link'  ? headline : undefined,
     linkDescription: postType === 'link'  ? `${bodyText}\n${TUMBLR_FOOTER}` : undefined,
@@ -187,6 +194,7 @@ export const publishDirect = action({
     contentItemId: v.id('contentItems'),
     channel: channelV,
     variantId: v.optional(v.id('contentVariants')),
+    slotId: v.optional(v.id('scheduleSlots')),
   },
   handler: async (ctx, args) => {
     const item = await ctx.runQuery(internal.contentItems.getByIdInternal, {
@@ -245,10 +253,15 @@ export const publishDirect = action({
       await ctx.runMutation(internal.contentVariants.updateStatusInternal, {
         id: variant._id, status: 'published', publishedLastAt: Date.now(),
       })
+      if (args.slotId) {
+        await ctx.runMutation(internal.scheduleSlots.deleteAfterPublishInternal, {
+          id: args.slotId,
+        })
+      }
       await ctx.runMutation(internal.auditEvents.log, {
         entityType: 'contentItem', entityId: args.contentItemId,
         eventType: 'item.published_direct',
-        payloadJson: { channel: args.channel, externalPostUrl: result.externalPostUrl, logId },
+        payloadJson: { channel: args.channel, externalPostUrl: result.externalPostUrl, logId, slotId: args.slotId },
       })
     }
 

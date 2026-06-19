@@ -1,6 +1,7 @@
 'use client'
 import Link from 'next/link'
-import { useQuery, useAction } from 'convex/react'
+import { useQuery, useAction, useMutation } from 'convex/react'
+import { useRouter } from 'next/navigation'
 import { api } from '@/convex/_generated/api'
 import { ContentEditor } from '@/components/editor/ContentEditor'
 import type { Id } from '@/convex/_generated/dataModel'
@@ -8,9 +9,23 @@ import type { ContentItem, MediaAsset } from '@/lib/types/domain'
 import { useState } from 'react'
 
 export default function EditItemPage({ params }: { params: { id: string } }) {
+  const router = useRouter()
   const data = useQuery(api.contentItems.getById, {
     id: params.id as Id<'contentItems'>,
   })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const deleteItem = useMutation((api.contentItems as any).deleteItem)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  async function handleDelete() {
+    if (!confirmDelete) { setConfirmDelete(true); return }
+    setDeleting(true)
+    try {
+      await deleteItem({ id: params.id as any })
+      router.push('/catalog')
+    } catch { setDeleting(false); setConfirmDelete(false) }
+  }
 
   if (data === undefined) {
     return (
@@ -38,10 +53,23 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="p-8 max-w-4xl mx-auto">
-      <div className="mb-6">
+      <div className="mb-6 flex items-center justify-between">
         <Link href="/catalog" className="text-sm text-indigo-600 hover:text-indigo-800">
           ← Volver al catálogo
         </Link>
+        <button
+          type="button"
+          onClick={handleDelete}
+          onBlur={() => setConfirmDelete(false)}
+          disabled={deleting}
+          className={`text-xs px-3 py-1.5 rounded font-medium transition-colors disabled:opacity-50 ${
+            confirmDelete
+              ? 'bg-red-600 text-white hover:bg-red-500'
+              : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
+          }`}
+        >
+          {deleting ? 'Eliminando…' : confirmDelete ? '¿Confirmar eliminación?' : '✕ Eliminar ítem'}
+        </button>
       </div>
 
       {/* Cover image panel */}

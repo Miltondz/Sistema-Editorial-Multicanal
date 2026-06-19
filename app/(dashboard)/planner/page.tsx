@@ -226,7 +226,7 @@ export default function PlannerPage() {
     if (!slot.contentItemId) return
     setActionMsg(null)
     try {
-      const r = await publishDirect({ contentItemId: slot.contentItemId, channel: slot.channel })
+      const r = await publishDirect({ contentItemId: slot.contentItemId, channel: slot.channel, slotId: slot._id })
       setActionMsg(r.success ? `Publicado${r.externalPostUrl ? ': ' + r.externalPostUrl : ''}` : `Error: ${r.error}`)
     } catch (err) { setActionMsg(`Error: ${err instanceof Error ? err.message : String(err)}`) }
     setSelectedSlot(null)
