@@ -89,7 +89,7 @@ export const list = query({
     }
 
     const base = ctx.db.query('contentItems').order('desc')
-    return await applySecondary(base, []).paginate(args.paginationOpts)
+    return await apply(base, []).paginate(args.paginationOpts)
   },
 })
 

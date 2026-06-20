@@ -70,7 +70,7 @@ async function corePublish(
       success = true
     } else {
       const payload = buildXPayload(variant, item, mediaAssets)
-      payloadJson = payload as Record<string, unknown>
+      payloadJson = payload as unknown as Record<string, unknown>
       const result = await publishTweet(payload)
       externalPostId = result.id
       externalPostUrl = result.url
