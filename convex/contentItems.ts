@@ -3,6 +3,7 @@ import { internal } from './_generated/api'
 import { v } from 'convex/values'
 import { paginationOptsValidator } from 'convex/server'
 import { computeCanonicalHash } from '../lib/utils/hash'
+import { VALID_TRANSITIONS, applySecondary } from '../lib/contentFilters'
 
 // ── Validators (keep in sync with schema) ──────────────────────────────────
 const contentTypeV = v.union(
@@ -28,17 +29,6 @@ const creatorRoleV = v.union(
 const creatorV = v.object({ role: creatorRoleV, name: v.string() })
 const sourcePlatformV = v.optional(v.union(v.literal('tumblr'), v.literal('x')))
 
-// Valid status transitions
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  draft:       ['researching', 'in_review', 'approved', 'archived'],
-  researching: ['in_review', 'approved', 'draft'],
-  in_review:   ['approved', 'draft', 'blocked'],
-  approved:    ['scheduled', 'published', 'archived'],
-  scheduled:   ['published', 'approved'],
-  published:   ['archived', 'approved'],
-  archived:    [],
-  blocked:     ['in_review'],
-}
 
 async function generateUniqueSlug(ctx: any, title: string): Promise<string> {
   const base = title
@@ -75,42 +65,27 @@ export const list = query({
     needsReview: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const applySecondary = (base: any, usedFields: string[]) => {
-      let q = base
-      if (!usedFields.includes('status') && args.status)
-        q = q.filter((f: any) => f.eq(f.field('status'), args.status!))
-      if (!usedFields.includes('contentType') && args.contentType)
-        q = q.filter((f: any) => f.eq(f.field('contentType'), args.contentType!))
-      if (!usedFields.includes('contentOrigin') && args.contentOrigin)
-        q = q.filter((f: any) => f.eq(f.field('contentOrigin'), args.contentOrigin!))
-      if (args.sourcePlatform)
-        q = q.filter((f: any) => f.eq(f.field('sourcePlatform'), args.sourcePlatform!))
-      if (args.enrichedManually !== undefined)
-        q = q.filter((f: any) => f.eq(f.field('enrichedManually'), args.enrichedManually!))
-      if (args.needsReview !== undefined)
-        q = q.filter((f: any) => f.eq(f.field('needsReview'), args.needsReview!))
-      return q
-    }
+    const apply = (base: any, usedFields: string[]) => applySecondary(base, usedFields, args)
 
     if (args.search && args.search.trim().length > 0) {
       const base = ctx.db
         .query('contentItems')
         .withSearchIndex('search_title', (q: any) => q.search('title', args.search!))
-      return await applySecondary(base, []).paginate(args.paginationOpts)
+      return await apply(base, []).paginate(args.paginationOpts)
     }
 
     // Pick primary index, then apply remaining filters
     if (args.contentOrigin) {
       const base = ctx.db.query('contentItems').withIndex('by_origin', (q: any) => q.eq('contentOrigin', args.contentOrigin!))
-      return await applySecondary(base, ['contentOrigin']).paginate(args.paginationOpts)
+      return await apply(base, ['contentOrigin']).paginate(args.paginationOpts)
     }
     if (args.status) {
       const base = ctx.db.query('contentItems').withIndex('by_status', (q: any) => q.eq('status', args.status!))
-      return await applySecondary(base, ['status']).paginate(args.paginationOpts)
+      return await apply(base, ['status']).paginate(args.paginationOpts)
     }
     if (args.contentType) {
       const base = ctx.db.query('contentItems').withIndex('by_content_type', (q: any) => q.eq('contentType', args.contentType!))
-      return await applySecondary(base, ['contentType']).paginate(args.paginationOpts)
+      return await apply(base, ['contentType']).paginate(args.paginationOpts)
     }
 
     const base = ctx.db.query('contentItems').order('desc')

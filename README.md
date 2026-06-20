@@ -113,10 +113,17 @@ convex/
 
 lib/
   preview/
-    payloads.ts           ← Funciones puras compartidas: assembleXTweet, buildFullTumblrCaption, stripHtml
+    payloads.ts           ← Funciones puras: assembleXTweet, buildFullTumblrCaption, buildTumblrPayload, buildXPayload
+    payloads.test.ts      ← 29 tests
   quality/
     variantLint.ts        ← Linter de variantes (frases prohibidas, promos, autorreferencias)
+    variantLint.test.ts   ← 15 tests
     similarity.ts         ← Similitud Jaccard para detección de duplicados
+    similarity.test.ts    ← 17 tests
+  contentFilters.ts       ← VALID_TRANSITIONS y applySecondary (puras, extraídas de Convex para testing)
+  contentFilters.test.ts  ← 24 tests
+  specialDates.ts         ← Búsqueda de fechas especiales vía Perplexity
+  specialDates.test.ts    ← 23 tests
 ```
 
 ---
@@ -187,6 +194,16 @@ Arranca en paralelo el servidor de Next.js y el watcher de Convex (`npx convex d
 ```bash
 npm test
 ```
+
+**108 tests, 5 archivos** — cobertura de las rutas de mayor riesgo:
+
+| Archivo | Tests | Qué cubre |
+|---------|-------|-----------|
+| `lib/preview/payloads.test.ts` | 29 | Payload builders Tumblr/X: routing foto/link/texto, fallback `coverImageUrl`, dedup de tags, cap 30, tweet 280 chars |
+| `lib/quality/variantLint.test.ts` | 15 | Linter: frases prohibidas, promos futuras, autorreferencias, stripping HTML |
+| `lib/quality/similarity.test.ts` | 17 | Jaccard: casos vacíos, mayúsculas, puntuación, tokens cortos; `findDuplicateCandidates` threshold/orden/cap |
+| `lib/contentFilters.test.ts` | 24 | `VALID_TRANSITIONS` (máquina de estados editorial) + `applySecondary` (stacking de filtros Convex) |
+| `lib/specialDates.test.ts` | 23 | `searchSpecialDates`, `parseResults`, validación y limpieza de resultados IA |
 
 ---
 

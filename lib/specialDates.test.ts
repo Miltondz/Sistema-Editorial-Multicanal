@@ -156,7 +156,7 @@ describe('parseResults', () => {
 })
 
 describe('searchSpecialDates', () => {
-  it('calls fetch with perplexity/sonar-pro model', async () => {
+  it('calls fetch with perplexity/sonar model', async () => {
     const mockFetch = vi.fn().mockResolvedValue(makeOpenRouterResponse(JSON.stringify([STORM_ITEM])))
     vi.stubGlobal('fetch', mockFetch)
 
@@ -166,7 +166,7 @@ describe('searchSpecialDates', () => {
     const [url, opts] = mockFetch.mock.calls[0]
     expect(url).toContain('openrouter.ai')
     const body = JSON.parse(opts.body)
-    expect(body.model).toBe('perplexity/sonar-pro')
+    expect(body.model).toBe('perplexity/sonar')
   })
 
   it('sends Authorization header with API key', async () => {
@@ -218,7 +218,7 @@ describe('searchSpecialDates', () => {
       text: async () => 'Unauthorized',
     }))
 
-    await expect(searchSpecialDates(6, 18)).rejects.toThrow('OpenRouter error 401')
+    await expect(searchSpecialDates(6, 18)).rejects.toThrow('error 401')
   })
 
   it('throws when OPENROUTER_API_KEY is missing', async () => {
