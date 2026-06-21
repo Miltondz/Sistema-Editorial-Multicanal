@@ -6,6 +6,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { complete, parseJsonSafe, SYSTEM_PROMPT_BASE } from '../../lib/integrations/openrouter'
 import { computeCanonicalHash } from '../../lib/utils/hash'
+import { enrichFromComicVine, getVolume, cvRoleToCreatorRole } from '../../lib/integrations/comicvine'
 
 const channelV = v.union(v.literal('tumblr'), v.literal('x'))
 
@@ -164,6 +165,31 @@ export const researchContent = action({
     const { parsed, sourcesUsed } = result
     const { confidence, sourcesUsed: _s, ...proposedItem } = parsed
 
+    // CV enrichment — best-effort, never throws
+    try {
+      if (proposedItem.title) {
+        const cv = await enrichFromComicVine(
+          proposedItem.title as string,
+          proposedItem.publisher as string | undefined,
+          args.contentType,
+        )
+        if (cv) {
+          proposedItem.cvId  = cv.cvId
+          proposedItem.cvUrl = cv.cvUrl
+          if (!proposedItem.coverImageUrl && cv.coverImageUrl) {
+            proposedItem.coverImageUrl = cv.coverImageUrl
+          }
+          // Use CV creators only when AI didn't return any
+          if (!(proposedItem.creators as any[])?.length && cv.creators?.length) {
+            proposedItem.creators = cv.creators
+          }
+          sourcesUsed.push('comicvine.gamespot.com')
+        }
+      }
+    } catch (cvErr) {
+      console.log('[researchContent:cv]', cvErr instanceof Error ? cvErr.message : String(cvErr))
+    }
+
     const possibleDuplicates: Array<{ id: string; title: string; similarity: number }> = []
     if (proposedItem.title) {
       const hash = await computeCanonicalHash({ title: proposedItem.title })
@@ -202,8 +228,27 @@ export const generateVariant = action({
     }) as any | null
     if (!item) throw new Error('Item not found')
 
-    const creatorsText = item.creators?.length
-      ? item.creators.map((c: any) => `${c.name} (${c.role})`).join(', ')
+    // If comic has a cvId and no manual creators, pull real credits from Comic Vine
+    let cvCreators: Array<{ name: string; role: string }> = []
+    if (item.cvId && item.contentType === 'comic' && !item.creators?.length) {
+      try {
+        const vol = await getVolume(item.cvId as number)
+        if (vol.person_credits?.length) {
+          cvCreators = vol.person_credits.map((pc: any) => ({
+            name: pc.name,
+            role: cvRoleToCreatorRole(pc.role),
+          }))
+        }
+      } catch {}
+    }
+
+    const creatorsSource: Array<{ name: string; role: string }> = item.creators?.length
+      ? item.creators
+      : cvCreators
+
+    const creatorsText = creatorsSource.length
+      ? creatorsSource.map((c: any) => `${c.name} (${c.role})`).join(', ')
+        + (cvCreators.length && !item.creators?.length ? ' [source: Comic Vine]' : '')
       : 'not listed in database — research from your training knowledge'
 
     const reprTags = item.representationTags?.join(', ') || 'not specified'

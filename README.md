@@ -110,8 +110,11 @@ convex/
     publisher.ts          ← Publicación a Tumblr y X, retry de slots fallidos
     ai.ts                 ← Generación y extracción con IA
     importer.ts           ← Importación desde Tumblr
+    comicvine.ts          ← Acciones públicas que exponen el cliente Comic Vine al frontend
 
 lib/
+  integrations/
+    comicvine.ts          ← Cliente Comic Vine API (search, character, volume, person, issue)
   preview/
     payloads.ts           ← Funciones puras: assembleXTweet, buildFullTumblrCaption, buildTumblrPayload, buildXPayload
     payloads.test.ts      ← 29 tests
@@ -179,6 +182,7 @@ X_ACCESS_TOKEN_SECRET
 ANTHROPIC_API_KEY
 OPENAI_API_KEY
 PERPLEXITY_API_KEY
+COMICVINE_API_KEY
 ```
 
 ### Iniciar en desarrollo

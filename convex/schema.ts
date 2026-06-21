@@ -92,6 +92,8 @@ export default defineSchema({
     importJobId: v.optional(v.id('importJobs')),
 
     enrichedManually: v.boolean(),
+    cvId:  v.optional(v.number()),
+    cvUrl: v.optional(v.string()),
 
     topicFatigueGroup: v.optional(v.string()),
     editorialPriority: v.number(),

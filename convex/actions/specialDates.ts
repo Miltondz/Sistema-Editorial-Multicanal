@@ -5,15 +5,55 @@ import { api, internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { complete, parseJsonSafe } from '../../lib/integrations/openrouter'
 import { searchSpecialDates } from '../../lib/specialDates'
+import { findCharacter, findPerson } from '../../lib/integrations/comicvine'
 
 export const generateIdeas = action({
   args: {
-    id: v.id('specialDates'),
-    title: v.string(),
+    id:          v.id('specialDates'),
+    title:       v.string(),
     description: v.optional(v.string()),
+    entityName:  v.optional(v.string()),  // character or person name for CV lookup
+    entityType:  v.optional(v.string()),  // 'character' | 'person'
   },
   handler: async (ctx, args): Promise<{ ideas: Array<{ title: string; body: string; hashtags: string[] }> }> => {
     const context = args.description ? `Additional context: ${args.description}` : ''
+
+    // CV enrichment: fetch structured data for the subject entity
+    let cvContext = ''
+    if (args.entityName) {
+      try {
+        if (args.entityType === 'person') {
+          const person = await findPerson(args.entityName)
+          if (person) {
+            const parts: string[] = [`Comic Vine data for ${person.name}:`]
+            if (person.deck) parts.push(person.deck)
+            if (person.country) parts.push(`Country: ${person.country}`)
+            if (person.created_characters?.length) {
+              parts.push(`Characters created: ${person.created_characters.slice(0, 10).map(c => c.name).join(', ')}`)
+            }
+            cvContext = parts.join('\n')
+          }
+        } else {
+          // Default: character lookup
+          const char = await findCharacter(args.entityName)
+          if (char) {
+            const parts: string[] = [`Comic Vine data for ${char.name}:`]
+            if (char.deck) parts.push(char.deck)
+            if (char.real_name) parts.push(`Real name: ${char.real_name}`)
+            if (char.publisher?.name) parts.push(`Publisher: ${char.publisher.name}`)
+            if (char.count_of_issue_appearances) parts.push(`Appears in: ${char.count_of_issue_appearances} issues`)
+            if (char.powers?.length) {
+              parts.push(`Powers: ${char.powers.slice(0, 8).map(p => p.name).join(', ')}`)
+            }
+            const fa = char.first_appeared_in_issue
+            if (fa) parts.push(`First appearance: ${fa.name ?? fa.api_detail_url ?? 'unknown'}`)
+            cvContext = parts.join('\n')
+          }
+        }
+      } catch (cvErr) {
+        console.log('[generateIdeas:cv]', cvErr instanceof Error ? cvErr.message : String(cvErr))
+      }
+    }
 
     const systemPrompt = `You are the senior editorial writer for SuperheroesInColor, a platform dedicated to diversity and inclusion in comics. You write in English only. Your editorial style is:
 - Grounded in real historical or cultural context (specific years, names, facts)
@@ -26,7 +66,7 @@ export const generateIdeas = action({
 
     const userMessage = `Special date: "${args.title}"
 ${context}
-
+${cvContext ? `\nVerified reference data (use these specific facts in your posts):\n${cvContext}\n` : ''}
 Generate 3 fully written editorial posts for Tumblr/social media commemorating this date.
 Each post must follow this 4-paragraph structure:
 1. Historical/factual context — who, what, when, where, why this date matters

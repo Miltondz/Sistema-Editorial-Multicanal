@@ -5,6 +5,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { searchComics } from '../../lib/comicsResearch'
 import type { SearchParams, Confidence } from '../../lib/comicsResearch.types'
+import { searchComicVine } from '../../lib/integrations/comicvine'
 
 export const runSearch = action({
   args: {
@@ -43,7 +44,31 @@ export const runSearch = action({
 
       const response = await searchComics(params)
 
-      const items = response.results.map(r => ({
+      // CV batch enrichment — top 5 results, best-effort
+      const enrichedResults = await Promise.all(
+        response.results.slice(0, 5).map(async r => {
+          try {
+            const query = `${r.title} ${r.publisher}`.trim()
+            const cvMatches = await searchComicVine(query, ['volume', 'issue'], 3)
+            if (!cvMatches.length) return r
+            const best = cvMatches.find(m => m.name?.toLowerCase() === r.title?.toLowerCase()) ?? cvMatches[0]
+            return {
+              ...r,
+              cvId:       best.id,
+              cvUrl:      best.site_detail_url,
+              cvCoverUrl: best.image?.original_url ?? best.image?.medium_url,
+            }
+          } catch {
+            return r  // ignore CV errors per-item
+          }
+        })
+      )
+      const allResults = [
+        ...enrichedResults,
+        ...response.results.slice(5),
+      ]
+
+      const items = allResults.map(r => ({
         title:       r.title,
         issue:       r.issue,
         publisher:   r.publisher,
