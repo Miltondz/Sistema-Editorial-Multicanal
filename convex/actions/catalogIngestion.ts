@@ -741,6 +741,106 @@ export const fixDiverseBatmanData = action({
   },
 })
 
+// ── Action: fix suspicious tags based on manual research ─────────────────────
+
+export const fixResearchedSuspiciousTags = action({
+  args: {},
+  handler: async (ctx): Promise<{ cleared: number; updated: number; added: number }> => {
+    let cleared = 0, updated = 0
+
+    // 1. Clear tags on entries that are groups/events/series titles or unverified
+    const toClear = [
+      'Daredevil',                        // Matt Murdock, no Asian Daredevil confirmed
+      'Fantastic Four',                   // Group — Black Panther/Storm already tracked separately
+      'Flashpoint',                       // DC event/universe, not a character
+      'Friendly Neighborhood Spider-Man', // Comic series title, not a character
+      'Green Lantern Corps',              // Group — John Stewart & Jessica Cruz already in catalog
+      'Spider-Man',                       // Peter Parker; Miles Morales tracked separately
+      'Ultimate Iron Man',                // Tony Stark Ultimate is not Latino
+      'Flashback',                        // French villain (Earth-One), no racial tag confirmed
+      'Microsuperman',                    // Could not be verified
+    ]
+    for (const name of toClear) {
+      const ok: boolean = await ctx.runMutation(internal.catalog.patchCharacterTags, { name, diversityTags: [] })
+      if (ok) cleared++
+    }
+
+    // 2. Update Aquaman → Jackson Hyde context (Aquaman: The Becoming, 2021)
+    const aquamanOk: boolean = await ctx.runMutation(internal.catalog.patchCharacterMantle, {
+      name: 'Aquaman',
+      mantleId: 'Aquaman',
+      versionType: 'legacy',
+      universe: 'Prime Earth',
+    })
+    if (aquamanOk) {
+      await ctx.runMutation(internal.catalog.patchCharacterTags, { name: 'Aquaman', diversityTags: ['black'] })
+      updated++
+    }
+
+    // 3. Update Ghost Rider 2099 → Kenshiro "Zero" Cochrane context (Earth-2099)
+    const gr2099ok: boolean = await ctx.runMutation(internal.catalog.patchCharacterMantle, {
+      name: 'Ghost Rider 2099',
+      mantleId: 'Ghost Rider',
+      versionType: 'future',
+      universe: 'Earth-2099',
+    })
+    if (gr2099ok) updated++
+
+    // 4. Add new entries: diverse Thor variants confirmed by research
+    const newChars = [
+      {
+        name:           'Eric Brooks Thor',
+        realName:       'Eric Brooks',
+        mantleId:       'Thor',
+        versionType:    'alternate_universe' as const,
+        universe:       'Thor Corps / alternate',
+        publisher:      'Marvel Comics',
+        diversityTags:  ['black'],
+        firstAppearance:'Mrs. Deadpool and the Howling Commandos #4',
+        deck:           'Eric Brooks (Blade) assumes the role of Thor in an alternate reality as part of the Thor Corps. Appeared in Mrs. Deadpool and the Howling Commandos #4.',
+        aliases:        ['Thor (Eric Brooks)', 'Blade Thor'],
+        sources:        ['manual'],
+      },
+      {
+        name:           'Miles Morales Thor',
+        realName:       'Miles Morales',
+        mantleId:       'Thor',
+        versionType:    'alternate_universe' as const,
+        universe:       'What If...? / alternate',
+        publisher:      'Marvel Comics',
+        diversityTags:  ['black', 'latino'],
+        firstAppearance:'What If...? Miles Morales Vol. 1 #4',
+        deck:           'Miles Morales becomes Thor in an alternate reality explored in What If...? Miles Morales Vol. 1 #4, wielding Mjolnir as a Black Latino version of the God of Thunder.',
+        aliases:        ['Thor (Miles Morales)'],
+        sources:        ['manual'],
+      },
+      {
+        name:           'Jackson Hyde',
+        realName:       'Jackson Hyde',
+        mantleId:       'Aquaman',
+        versionType:    'legacy' as const,
+        universe:       'Prime Earth',
+        publisher:      'DC Comics',
+        diversityTags:  ['black'],
+        firstAppearance:'Aquaman: The Becoming #1 (2021)',
+        deck:           'Jackson Hyde, former Aqualad, takes up the mantle of Aquaman in Aquaman: The Becoming (2021). Son of Black Manta, he becomes the third Aquaman in DC main continuity.',
+        aliases:        ['Aquaman (Jackson Hyde)', 'Aqualad', 'Kaldur\'ahm (comics)'],
+        sources:        ['manual'],
+      },
+    ]
+    for (const char of newChars) {
+      await ctx.runMutation(internal.catalog.upsertCharacter, char)
+    }
+
+    // 5. Clear the "Thor" base entry's incorrect black tag (Thor Odinson is Asgardian/white)
+    await ctx.runMutation(internal.catalog.patchCharacterTags, { name: 'Thor', diversityTags: [] })
+    cleared++
+
+    console.log(`[suspicious:fix] cleared=${cleared} updated=${updated} added=${newChars.length}`)
+    return { cleared, updated, added: newChars.length }
+  },
+})
+
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────
 
 export const runFullIngestion = action({
