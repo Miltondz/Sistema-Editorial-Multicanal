@@ -37,6 +37,10 @@ function EditForm({ char, onClose, onSave }: {
   const [powersRaw,       setPowersRaw]       = useState((char.powers ?? []).join(', '))
   const [aliasesRaw,      setAliasesRaw]      = useState((char.aliases ?? []).join(', '))
   const [tags,            setTags]            = useState<string[]>(char.diversityTags)
+  const [mantleId,        setMantleId]        = useState((char as Record<string, unknown>).mantleId as string ?? '')
+  const [versionType,     setVersionType]     = useState((char as Record<string, unknown>).versionType as string ?? '')
+  const [universe,        setUniverse]        = useState((char as Record<string, unknown>).universe as string ?? '')
+  const [legacyIndex,     setLegacyIndex]     = useState(((char as Record<string, unknown>).legacyIndex as number | undefined)?.toString() ?? '')
   const [saving,          setSaving]          = useState(false)
   const [error,           setError]           = useState<string | null>(null)
 
@@ -63,6 +67,10 @@ function EditForm({ char, onClose, onSave }: {
         powers:          powersRaw.trim() ? powersRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined,
         aliases:         aliasesRaw.trim() ? aliasesRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
         diversityTags:   tags,
+        mantleId:        mantleId.trim() || undefined,
+        versionType:     versionType || undefined,
+        universe:        universe.trim() || undefined,
+        legacyIndex:     legacyIndex.trim() ? parseInt(legacyIndex.trim()) : undefined,
       })
       onClose()
     } catch (err) {
@@ -143,6 +151,26 @@ function EditForm({ char, onClose, onSave }: {
             <Field label="Comic Vine URL" value={cvUrl} onChange={setCvUrl} />
             <Field label="Wikipedia URL" value={wikiUrl} onChange={setWikiUrl} />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Manto (mantleId)" value={mantleId} onChange={setMantleId} placeholder="ej: Batman, Robin" />
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Tipo de versión</label>
+              <select value={versionType} onChange={e => setVersionType(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white"
+                style={{ background: '#1e293b', border: '1px solid #334155' }}>
+                <option value="">— ninguno —</option>
+                <option value="original">Original</option>
+                <option value="legacy">Legado</option>
+                <option value="alternate_universe">Universo alterno</option>
+                <option value="future">Versión futura</option>
+                <option value="what_if">What If / Elseworlds</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Universo / Tierra" value={universe} onChange={setUniverse} placeholder="ej: Earth-616, Flashpoint" />
+            <Field label="Índice de legado" value={legacyIndex} onChange={setLegacyIndex} placeholder="1, 2, 3…" />
+          </div>
 
           {error && <p className="text-red-400 text-xs">{error}</p>}
 
@@ -181,10 +209,15 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
   const [confirmDel,  setConfirmDel]  = useState(false)
   const [deleting,    setDeleting]    = useState(false)
 
-  const char      = useQuery(api.catalog.getCharacterById, {
+  const char       = useQuery(api.catalog.getCharacterById, {
     id: params.id as Id<'catalogCharacters'>,
   })
-  const editChar  = useMutation(api.catalog.editCharacter)
+  const charMantle = char as (typeof char & { mantleId?: string; versionType?: string; universe?: string; legacyIndex?: number }) | null | undefined
+  const mantleVersions = useQuery(
+    api.catalog.getCharactersByMantle,
+    charMantle?.mantleId ? { mantleId: charMantle.mantleId } : 'skip',
+  )
+  const editChar   = useMutation(api.catalog.editCharacter)
   const deleteChar = useMutation(api.catalog.deleteCharacter)
 
   async function handleSave(fields: Record<string, unknown>) {
@@ -307,6 +340,25 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
                 <p className="text-sm font-mono text-slate-600">{char.cvId}</p>
               </div>
             )}
+            {charMantle?.mantleId && (
+              <div>
+                <p className="text-xs text-slate-400 mb-0.5">Manto</p>
+                <p className="text-sm font-medium text-slate-800">{charMantle.mantleId}</p>
+                {charMantle.versionType && (
+                  <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-xs"
+                    style={{ background: '#f0fdf4', color: '#16a34a', fontSize: 10 }}>
+                    {charMantle.versionType === 'original' ? 'Original'
+                      : charMantle.versionType === 'legacy' ? `Legado${charMantle.legacyIndex ? ` #${charMantle.legacyIndex}` : ''}`
+                      : charMantle.versionType === 'alternate_universe' ? 'Universo alterno'
+                      : charMantle.versionType === 'future' ? 'Versión futura'
+                      : 'What If'}
+                  </span>
+                )}
+                {charMantle.universe && (
+                  <p className="text-xs text-slate-500 mt-0.5">{charMantle.universe}</p>
+                )}
+              </div>
+            )}
             <div>
               <p className="text-xs text-slate-400 mb-1">Fuentes</p>
               <div className="flex flex-wrap gap-1">
@@ -396,6 +448,53 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
                     {a}
                   </span>
                 ))}
+              </div>
+            </Section>
+          )}
+
+          {/* Mantle versions */}
+          {mantleVersions && mantleVersions.filter(v => v._id !== char._id).length > 0 && (
+            <Section title={`Otras versiones del manto "${charMantle?.mantleId}"`}>
+              <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
+                {mantleVersions
+                  .filter(v => v._id !== char._id)
+                  .sort((a, b) => {
+                    const av = a as typeof a & { legacyIndex?: number; versionType?: string }
+                    const bv = b as typeof b & { legacyIndex?: number; versionType?: string }
+                    if (av.versionType === 'original') return -1
+                    if (bv.versionType === 'original') return 1
+                    return (av.legacyIndex ?? 99) - (bv.legacyIndex ?? 99)
+                  })
+                  .map(v => {
+                    const vt = v as typeof v & { versionType?: string; universe?: string; legacyIndex?: number }
+                    return (
+                      <Link key={v._id} href={`/characters/${v._id}`}
+                        className="flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all hover:scale-105"
+                        style={{ background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                        <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center"
+                          style={{ background: '#e2e8f0' }}>
+                          {v.coverUrl
+                            ? <img src={v.coverUrl} alt={v.name} className="w-full h-full object-cover"
+                                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                            : <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                              </svg>
+                          }
+                        </div>
+                        <p className="text-xs font-medium text-slate-700 text-center leading-tight">{v.name}</p>
+                        {vt.versionType && (
+                          <span className="text-center" style={{ fontSize: 9, color: '#94a3b8' }}>
+                            {vt.versionType === 'original' ? 'Original'
+                              : vt.versionType === 'legacy' ? `Legado${vt.legacyIndex ? ` #${vt.legacyIndex}` : ''}`
+                              : vt.versionType === 'alternate_universe' ? vt.universe ?? 'Alt. Universe'
+                              : vt.versionType === 'future' ? 'Futuro'
+                              : 'What If'}
+                          </span>
+                        )}
+                      </Link>
+                    )
+                  })}
               </div>
             </Section>
           )}

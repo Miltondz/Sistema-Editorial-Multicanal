@@ -20,6 +20,10 @@ export const upsertCharacter = internalMutation({
     firstAppearance: v.optional(v.string()),
     coverUrl:        v.optional(v.string()),
     wikiUrl:         v.optional(v.string()),
+    mantleId:        v.optional(v.string()),
+    versionType:     v.optional(v.string()),
+    universe:        v.optional(v.string()),
+    legacyIndex:     v.optional(v.number()),
     sources:         v.array(v.string()),
     cvEnrichedAt:    v.optional(v.number()),
   },
@@ -52,6 +56,10 @@ export const upsertCharacter = internalMutation({
         ...(args.firstAppearance     ? { firstAppearance:  args.firstAppearance }  : {}),
         ...(args.coverUrl            ? { coverUrl:         args.coverUrl }         : {}),
         ...(args.wikiUrl             ? { wikiUrl:          args.wikiUrl }          : {}),
+        ...(args.mantleId            ? { mantleId:         args.mantleId }         : {}),
+        ...(args.versionType         ? { versionType:      args.versionType }      : {}),
+        ...(args.universe            ? { universe:         args.universe }         : {}),
+        ...(args.legacyIndex != null ? { legacyIndex:      args.legacyIndex }      : {}),
         ...(args.cvEnrichedAt != null? { cvEnrichedAt:     args.cvEnrichedAt }     : {}),
       })
       return existing._id
@@ -70,6 +78,10 @@ export const upsertCharacter = internalMutation({
       firstAppearance: args.firstAppearance,
       coverUrl:        args.coverUrl,
       wikiUrl:         args.wikiUrl,
+      mantleId:        args.mantleId,
+      versionType:     args.versionType,
+      universe:        args.universe,
+      legacyIndex:     args.legacyIndex,
       sources:         args.sources,
       cvEnrichedAt:    args.cvEnrichedAt,
       createdAt:       ts,
@@ -220,6 +232,22 @@ export const getUnenrichedCharacters = internalQuery({
   },
 })
 
+export const getCharactersWithoutWikiUrl = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => {
+    const all = await ctx.db.query('catalogCharacters').collect()
+    return all.filter(r => !r.wikiUrl).slice(0, limit ?? 200)
+  },
+})
+
+export const getCreatorsWithoutWikiUrl = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => {
+    const all = await ctx.db.query('catalogCreators').collect()
+    return all.filter(r => !r.wikiUrl).slice(0, limit ?? 200)
+  },
+})
+
 // ── Export (for Supabase migration / own API) ─────────────────────────────────
 // Returns clean JSON — drop _id, keep all portable fields.
 // In Supabase: INSERT INTO characters SELECT * FROM jsonb_populate_recordset(...)
@@ -248,6 +276,39 @@ export const exportCreators = query({
 export const getCharacterById = query({
   args: { id: v.id('catalogCharacters') },
   handler: async (ctx, { id }) => ctx.db.get(id),
+})
+
+export const getCharactersByMantle = query({
+  args: { mantleId: v.string() },
+  handler: async (ctx, { mantleId }) =>
+    ctx.db.query('catalogCharacters')
+      .withIndex('by_mantle', q => q.eq('mantleId', mantleId))
+      .collect(),
+})
+
+export const patchCharacterMantle = internalMutation({
+  args: {
+    name:        v.string(),
+    mantleId:    v.string(),
+    versionType: v.string(),
+    universe:    v.optional(v.string()),
+    legacyIndex: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<boolean> => {
+    const existing = await ctx.db
+      .query('catalogCharacters')
+      .withIndex('by_name', q => q.eq('name', args.name))
+      .first()
+    if (!existing) return false
+    await ctx.db.patch(existing._id, {
+      mantleId:    args.mantleId,
+      versionType: args.versionType,
+      ...(args.universe        ? { universe:    args.universe }    : {}),
+      ...(args.legacyIndex != null ? { legacyIndex: args.legacyIndex } : {}),
+      updatedAt: now(),
+    })
+    return true
+  },
 })
 
 export const getCreatorById = query({
@@ -289,6 +350,10 @@ export const createCharacter = mutation({
     firstAppearance: v.optional(v.string()),
     coverUrl:        v.optional(v.string()),
     wikiUrl:         v.optional(v.string()),
+    mantleId:        v.optional(v.string()),
+    versionType:     v.optional(v.string()),
+    universe:        v.optional(v.string()),
+    legacyIndex:     v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -299,10 +364,10 @@ export const createCharacter = mutation({
     const ts = now()
     return ctx.db.insert('catalogCharacters', {
       ...args,
-      aliases:       args.aliases ?? [],
-      sources:       ['manual'],
-      createdAt:     ts,
-      updatedAt:     ts,
+      aliases:   args.aliases ?? [],
+      sources:   ['manual'],
+      createdAt: ts,
+      updatedAt: ts,
     })
   },
 })
@@ -322,6 +387,10 @@ export const editCharacter = mutation({
     firstAppearance: v.optional(v.string()),
     coverUrl:        v.optional(v.string()),
     wikiUrl:         v.optional(v.string()),
+    mantleId:        v.optional(v.string()),
+    versionType:     v.optional(v.string()),
+    universe:        v.optional(v.string()),
+    legacyIndex:     v.optional(v.number()),
   },
   handler: async (ctx, { id, ...fields }) => {
     await ctx.db.patch(id, { ...fields, updatedAt: now() })

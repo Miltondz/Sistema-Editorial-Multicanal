@@ -23,6 +23,7 @@ type CharDoc = {
   diversityTags: string[]; powers?: string[]; coverUrl?: string
   cvUrl?: string; firstAppearance?: string; aliases?: string[]
   cvId?: number; wikiUrl?: string; cvEnrichedAt?: number
+  mantleId?: string; versionType?: string; universe?: string; legacyIndex?: number
   sources: string[]; createdAt: number; updatedAt: number
 }
 
@@ -47,6 +48,10 @@ function CharacterForm({
   const [powersRaw,       setPowersRaw]       = useState((initial?.powers ?? []).join(', '))
   const [aliasesRaw,      setAliasesRaw]      = useState((initial?.aliases ?? []).join(', '))
   const [tags,            setTags]            = useState<string[]>(initial?.diversityTags ?? [])
+  const [mantleId,        setMantleId]        = useState(initial?.mantleId ?? '')
+  const [versionType,     setVersionType]     = useState(initial?.versionType ?? '')
+  const [universe,        setUniverse]        = useState(initial?.universe ?? '')
+  const [legacyIndex,     setLegacyIndex]     = useState(initial?.legacyIndex?.toString() ?? '')
   const [saving,          setSaving]          = useState(false)
   const [error,           setError]           = useState<string | null>(null)
 
@@ -73,6 +78,10 @@ function CharacterForm({
         powers:          powersRaw.trim() ? powersRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined,
         aliases:         aliasesRaw.trim() ? aliasesRaw.split(',').map(s => s.trim()).filter(Boolean) : [],
         diversityTags:   tags,
+        mantleId:        mantleId.trim() || undefined,
+        versionType:     versionType || undefined,
+        universe:        universe.trim() || undefined,
+        legacyIndex:     legacyIndex.trim() ? parseInt(legacyIndex.trim()) : undefined,
         cvEnrichedAt:    initial?.cvEnrichedAt,
       })
       onClose()
@@ -137,6 +146,29 @@ function CharacterForm({
 
           {/* Aliases */}
           <Field label="Alias (separados por coma)" value={aliasesRaw} onChange={setAliasesRaw} />
+
+          {/* Mantle / version */}
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Manto (mantleId)" value={mantleId} onChange={setMantleId} placeholder="ej: Batman, Robin, Superman" />
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Tipo de versión</label>
+              <select value={versionType} onChange={e => setVersionType(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white"
+                style={{ background: '#1e293b', border: '1px solid #334155' }}
+              >
+                <option value="">— ninguno —</option>
+                <option value="original">Original (primer portador)</option>
+                <option value="legacy">Legado (sucesor generacional)</option>
+                <option value="alternate_universe">Universo alterno</option>
+                <option value="future">Versión futura</option>
+                <option value="what_if">What If / Elseworlds</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Universo / Tierra" value={universe} onChange={setUniverse} placeholder="ej: Earth-616, Flashpoint, New 52" />
+            <Field label="Índice de legado" value={legacyIndex} onChange={setLegacyIndex} placeholder="1 = primero, 2 = segundo…" />
+          </div>
 
           {/* URLs */}
           <div className="grid grid-cols-2 gap-3">

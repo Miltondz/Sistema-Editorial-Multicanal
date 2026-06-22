@@ -366,6 +366,11 @@ export default defineSchema({
     coverUrl:        v.optional(v.string()),
     // Wikipedia
     wikiUrl:         v.optional(v.string()),
+    // Mantle / version tracking (legacy + multiverse)
+    mantleId:        v.optional(v.string()),  // canonical identity: "Batman", "Robin", "Superman"
+    versionType:     v.optional(v.string()),  // "original"|"legacy"|"alternate_universe"|"future"|"what_if"
+    universe:        v.optional(v.string()),  // "Earth-616","Earth-2","Flashpoint","Ultimate","New 52"
+    legacyIndex:     v.optional(v.number()),  // succession order for legacy (1=first holder)
     // Provenance
     sources:         v.array(v.string()),     // ['worldofblackheroes','wikipedia','manual']
     // Freshness tracking
@@ -375,7 +380,8 @@ export default defineSchema({
   })
     .index('by_name',     ['name'])
     .index('by_cvId',     ['cvId'])
-    .index('by_enriched', ['cvEnrichedAt']),  // for batch enrichment queries
+    .index('by_enriched', ['cvEnrichedAt'])
+    .index('by_mantle',   ['mantleId']),
 
   catalogCreators: defineTable({
     // Identity
