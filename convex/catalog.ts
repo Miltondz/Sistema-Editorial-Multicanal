@@ -169,12 +169,16 @@ export const searchCharacters = query({
   args: {
     diversityTags: v.optional(v.array(v.string())),
     enrichedOnly:  v.optional(v.boolean()),
+    needsReview:   v.optional(v.boolean()),
     limit:         v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     let rows = await ctx.db.query('catalogCharacters').order('asc').collect()
     if (args.diversityTags?.length) {
       rows = rows.filter(r => args.diversityTags!.some(t => r.diversityTags.includes(t)))
+    }
+    if (args.needsReview) {
+      rows = rows.filter(r => r.needsReview === true)
     }
     if (args.enrichedOnly) {
       rows = rows.filter(r => r.cvEnrichedAt != null)
@@ -203,10 +207,12 @@ export const getCatalogStats = query({
       for (const t of c.diversityTags) tagCounts[t] = (tagCounts[t] ?? 0) + 1
     }
     return {
-      characters:         chars.length,
-      charactersEnriched: chars.filter(c => c.cvEnrichedAt != null).length,
-      creators:           creators.length,
-      creatorsEnriched:   creators.filter(c => c.cvEnrichedAt != null).length,
+      characters:            chars.length,
+      charactersEnriched:    chars.filter(c => c.cvEnrichedAt != null).length,
+      charactersNeedsReview: chars.filter(c => c.needsReview === true).length,
+      creators:              creators.length,
+      creatorsEnriched:      creators.filter(c => c.cvEnrichedAt != null).length,
+      creatorsNeedsReview:   creators.filter(c => c.needsReview === true).length,
       tagCounts,
     }
   },
@@ -350,12 +356,16 @@ export const searchCreators = query({
   args: {
     diversityTags: v.optional(v.array(v.string())),
     enrichedOnly:  v.optional(v.boolean()),
+    needsReview:   v.optional(v.boolean()),
     limit:         v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     let rows = await ctx.db.query('catalogCreators').order('asc').collect()
     if (args.diversityTags?.length) {
       rows = rows.filter(r => args.diversityTags!.some(t => r.diversityTags.includes(t)))
+    }
+    if (args.needsReview) {
+      rows = rows.filter(r => r.needsReview === true)
     }
     if (args.enrichedOnly) {
       rows = rows.filter(r => r.cvEnrichedAt != null)
@@ -523,4 +533,34 @@ export const editCreator = mutation({
 export const deleteCreator = mutation({
   args: { id: v.id('catalogCreators') },
   handler: async (ctx, { id }) => ctx.db.delete(id),
+})
+
+// ── needsReview helpers ───────────────────────────────────────────────────────
+
+export const markCharacterReviewed = mutation({
+  args: { id: v.id('catalogCharacters') },
+  handler: async (ctx, { id }) => ctx.db.patch(id, { needsReview: false, updatedAt: now() }),
+})
+
+export const markCreatorReviewed = mutation({
+  args: { id: v.id('catalogCreators') },
+  handler: async (ctx, { id }) => ctx.db.patch(id, { needsReview: false, updatedAt: now() }),
+})
+
+export const batchMarkNeedsReview = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ marked: number }> => {
+    const chars = await ctx.db.query('catalogCharacters').collect()
+    let marked = 0
+    for (const char of chars) {
+      const isManual   = char.sources.includes('manual')
+      const hasContext = char.deck || char.realName || char.universe
+      const alreadySet = char.needsReview === true
+      if (char.diversityTags.length > 0 && !hasContext && !isManual && !alreadySet) {
+        await ctx.db.patch(char._id, { needsReview: true, updatedAt: now() })
+        marked++
+      }
+    }
+    return { marked }
+  },
 })

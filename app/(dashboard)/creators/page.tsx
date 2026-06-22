@@ -1,5 +1,6 @@
 'use client'
 import { useState, useMemo } from 'react'
+import Link from 'next/link'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
@@ -26,6 +27,7 @@ type CreatorDoc = {
   coverUrl?: string; cvUrl?: string; wikiUrl?: string
   aliases?: string[]; cvId?: number; cvEnrichedAt?: number
   storageId?: Id<'_storage'>; storageImageUrl?: string | null
+  needsReview?: boolean
   sources: string[]; createdAt: number; updatedAt: number
   notableWorkCvIds?: number[]
 }
@@ -217,10 +219,11 @@ function Field({ label, value, onChange, placeholder, textarea }: {
 
 // ── Creator card ──────────────────────────────────────────────────────────────
 
-function CreatorCard({ creator, onEdit, onDelete }: {
+function CreatorCard({ creator, onEdit, onDelete, onMarkReviewed }: {
   creator: CreatorDoc
   onEdit: () => void
   onDelete: () => void
+  onMarkReviewed: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -229,19 +232,21 @@ function CreatorCard({ creator, onEdit, onDelete }: {
       style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
       {/* Photo */}
       <div className="relative flex-shrink-0" style={{ height: 140, background: '#1e293b', overflow: 'hidden' }}>
-        {(creator.storageImageUrl ?? creator.coverUrl)
-          ? <img src={creator.storageImageUrl ?? creator.coverUrl} alt={creator.name}
-              className="w-full h-full object-cover object-top"
-              loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-          : <div className="w-full h-full flex items-center justify-center">
-              <svg className="w-10 h-10 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                  d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-            </div>
-        }
+        <Link href={`/creators/${creator._id}`} className="block w-full h-full">
+          {(creator.storageImageUrl ?? creator.coverUrl)
+            ? <img src={creator.storageImageUrl ?? creator.coverUrl} alt={creator.name}
+                className="w-full h-full object-cover object-top hover:scale-105 transition-transform"
+                loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            : <div className="w-full h-full flex items-center justify-center hover:bg-slate-700 transition-colors">
+                <svg className="w-10 h-10 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+          }
+        </Link>
         {/* Tags */}
-        <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
+        <div className="absolute bottom-2 left-2 flex flex-wrap gap-1 pointer-events-none">
           {creator.diversityTags.map(t => {
             const c = TAG_COLORS[t] ?? TAG_COLORS.black
             return (
@@ -250,8 +255,24 @@ function CreatorCard({ creator, onEdit, onDelete }: {
             )
           })}
         </div>
+        {/* needsReview badge */}
+        {creator.needsReview && (
+          <div className="absolute top-2 left-2 pointer-events-none">
+            <span className="px-1.5 py-0.5 rounded text-xs font-bold"
+              style={{ background: '#92400e', color: '#fbbf24', fontSize: 10 }}>! revisar</span>
+          </div>
+        )}
         {/* Actions */}
         <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          {creator.needsReview && (
+            <button onClick={onMarkReviewed}
+              className="w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: '#92400e' }} title="Marcar como revisado">
+              <svg className="w-3.5 h-3.5" style={{ color: '#fbbf24' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+          )}
           <button onClick={onEdit}
             className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ background: '#334155' }} title="Editar">
@@ -280,7 +301,9 @@ function CreatorCard({ creator, onEdit, onDelete }: {
 
       {/* Body */}
       <div className="flex-1 p-3 space-y-1.5">
-        <h3 className="text-white font-semibold text-sm leading-tight">{creator.name}</h3>
+        <Link href={`/creators/${creator._id}`} className="hover:text-indigo-400 transition-colors">
+          <h3 className="text-white font-semibold text-sm leading-tight">{creator.name}</h3>
+        </Link>
 
         {/* Roles */}
         <div className="flex flex-wrap gap-1">
@@ -320,25 +343,28 @@ function CreatorCard({ creator, onEdit, onDelete }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CreatorsPage() {
-  const [activeTag,   setActiveTag]   = useState('')
-  const [activeRole,  setActiveRole]  = useState('')
-  const [search,      setSearch]      = useState('')
-  const [showForm,    setShowForm]    = useState(false)
-  const [editTarget,  setEditTarget]  = useState<CreatorDoc | null>(null)
-  const [page,        setPage]        = useState(1)
-  const [pageSize,    setPageSize]    = useState(50)
+  const [activeTag,       setActiveTag]       = useState('')
+  const [activeRole,      setActiveRole]      = useState('')
+  const [onlyNeedsReview, setOnlyNeedsReview] = useState(false)
+  const [search,          setSearch]          = useState('')
+  const [showForm,        setShowForm]        = useState(false)
+  const [editTarget,      setEditTarget]      = useState<CreatorDoc | null>(null)
+  const [page,            setPage]            = useState(1)
+  const [pageSize,        setPageSize]        = useState(50)
 
   function resetPage() { setPage(1) }
 
-  const createCreator    = useMutation(api.catalog.createCreator)
-  const editCreator      = useMutation(api.catalog.editCreator)
-  const deleteCreator    = useMutation(api.catalog.deleteCreator)
-  const setCreatorImage  = useMutation(api.catalog.setCreatorImage)
+  const createCreator     = useMutation(api.catalog.createCreator)
+  const editCreator       = useMutation(api.catalog.editCreator)
+  const deleteCreator     = useMutation(api.catalog.deleteCreator)
+  const setCreatorImage   = useMutation(api.catalog.setCreatorImage)
   const clearCreatorImage = useMutation(api.catalog.clearCreatorImage)
+  const markReviewed      = useMutation(api.catalog.markCreatorReviewed)
 
   const stats    = useQuery(api.catalog.getCatalogStats)
   const creators = useQuery(api.catalog.searchCreators, {
     diversityTags: activeTag ? [activeTag] : undefined,
+    needsReview: onlyNeedsReview ? true : undefined,
     limit: 500,
   }) as CreatorDoc[] | undefined
 
@@ -414,8 +440,9 @@ export default function CreatorsPage() {
             {stats && (
               <div className="flex gap-2">
                 {[
-                  { label: 'Total',    value: stats.creators.toLocaleString(),        color: '#1e293b' },
-                  { label: 'Con CV',   value: stats.creatorsEnriched.toLocaleString(),color: '#6366f1' },
+                  { label: 'Total',    value: stats.creators.toLocaleString(),                       color: '#1e293b' },
+                  { label: 'Con CV',   value: stats.creatorsEnriched.toLocaleString(),           color: '#6366f1' },
+                  { label: 'Revisar',  value: (stats.creatorsNeedsReview ?? 0).toLocaleString(), color: '#d97706' },
                 ].map(s => (
                   <div key={s.label} className="rounded-xl px-3 py-2 text-center"
                     style={{ background: '#fff', border: '1px solid #e2e8f0' }}>
@@ -474,6 +501,16 @@ export default function CreatorsPage() {
             {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
 
+          <button onClick={() => { setOnlyNeedsReview(v => !v); resetPage() }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={onlyNeedsReview
+              ? { background: '#451a03', border: '1px solid #92400e', color: '#fbbf24' }
+              : { background: '#fff', border: '1px solid #e2e8f0', color: '#64748b' }
+            }
+          >
+            {stats?.creatorsNeedsReview ? `! Revisar (${stats.creatorsNeedsReview})` : '! Revisar'}
+          </button>
+
           {creators && (
             <span className="text-xs text-slate-400 ml-auto">{filtered.length.toLocaleString()} creadores</span>
           )}
@@ -495,6 +532,7 @@ export default function CreatorsPage() {
                       creator={c}
                       onEdit={() => { setEditTarget(c); setShowForm(true) }}
                       onDelete={() => handleDelete(c._id)}
+                      onMarkReviewed={() => markReviewed({ id: c._id })}
                     />
                   ))}
                 </div>

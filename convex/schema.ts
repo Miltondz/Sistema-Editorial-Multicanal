@@ -373,6 +373,8 @@ export default defineSchema({
     legacyIndex:     v.optional(v.number()),  // succession order for legacy (1=first holder)
     // Custom image (takes priority over coverUrl)
     storageId:       v.optional(v.id('_storage')),
+    // Data quality flag — true = needs human verification of tags/context
+    needsReview:     v.optional(v.boolean()),
     // Provenance
     sources:         v.array(v.string()),     // ['worldofblackheroes','wikipedia','manual']
     // Freshness tracking
@@ -383,7 +385,8 @@ export default defineSchema({
     .index('by_name',     ['name'])
     .index('by_cvId',     ['cvId'])
     .index('by_enriched', ['cvEnrichedAt'])
-    .index('by_mantle',   ['mantleId']),
+    .index('by_mantle',   ['mantleId'])
+    .index('by_needs_review', ['needsReview']),
 
   catalogCreators: defineTable({
     // Identity
@@ -403,6 +406,8 @@ export default defineSchema({
     wikiUrl:         v.optional(v.string()),
     // Custom image (takes priority over coverUrl)
     storageId:       v.optional(v.id('_storage')),
+    // Data quality flag
+    needsReview:     v.optional(v.boolean()),
     // Notable works (cvIds of volumes/issues)
     notableWorkCvIds: v.optional(v.array(v.number())),
     // Provenance

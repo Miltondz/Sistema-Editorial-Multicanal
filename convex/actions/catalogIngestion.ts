@@ -1082,6 +1082,14 @@ export const batchDataQualityFix = action({
   },
 })
 
+// ── Action: batch-mark entries that need review ───────────────────────────────
+
+export const markAllNeedsReview = action({
+  args: {},
+  handler: async (ctx): Promise<{ marked: number }> =>
+    ctx.runMutation(internal.catalog.batchMarkNeedsReview, {}),
+})
+
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────
 
 export const runFullIngestion = action({

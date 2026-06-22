@@ -27,6 +27,7 @@ type CharDoc = {
   cvId?: number; wikiUrl?: string; cvEnrichedAt?: number
   mantleId?: string; versionType?: string; universe?: string; legacyIndex?: number
   storageId?: Id<'_storage'>; storageImageUrl?: string | null
+  needsReview?: boolean
   sources: string[]; createdAt: number; updatedAt: number
 }
 
@@ -239,10 +240,11 @@ function Field({ label, value, onChange, placeholder, textarea }: {
 
 // ── Character card ────────────────────────────────────────────────────────────
 
-function CharacterCard({ char, onEdit, onDelete }: {
+function CharacterCard({ char, onEdit, onDelete, onMarkReviewed }: {
   char: CharDoc
   onEdit: () => void
   onDelete: () => void
+  onMarkReviewed: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -274,6 +276,15 @@ function CharacterCard({ char, onEdit, onDelete }: {
             )
           })}
         </div>
+        {/* needsReview badge */}
+        {char.needsReview && (
+          <div className="absolute top-2 left-2 pointer-events-none">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold"
+              style={{ background: '#92400e', color: '#fbbf24', fontSize: 10 }}>
+              ! revisar
+            </span>
+          </div>
+        )}
         {/* Action buttons */}
         <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <button onClick={onEdit}
@@ -284,6 +295,15 @@ function CharacterCard({ char, onEdit, onDelete }: {
                 d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
           </button>
+          {char.needsReview && (
+            <button onClick={onMarkReviewed}
+              className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
+              style={{ background: '#92400e' }} title="Marcar como revisado">
+              <svg className="w-3.5 h-3.5" style={{ color: '#fbbf24' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </button>
+          )}
           {!confirmDelete
             ? <button onClick={() => setConfirmDelete(true)}
                 className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
@@ -340,26 +360,29 @@ function CharacterCard({ char, onEdit, onDelete }: {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CharactersPage() {
-  const [activeTag,    setActiveTag]    = useState('')
-  const [enrichedOnly, setEnriched]    = useState(false)
-  const [search,       setSearch]      = useState('')
-  const [showForm,     setShowForm]    = useState(false)
-  const [editTarget,   setEditTarget]  = useState<CharDoc | null>(null)
-  const [page,         setPage]        = useState(1)
-  const [pageSize,     setPageSize]    = useState(50)
+  const [activeTag,      setActiveTag]      = useState('')
+  const [enrichedOnly,   setEnriched]       = useState(false)
+  const [onlyNeedsReview,setOnlyNeedsReview]= useState(false)
+  const [search,         setSearch]         = useState('')
+  const [showForm,       setShowForm]       = useState(false)
+  const [editTarget,     setEditTarget]     = useState<CharDoc | null>(null)
+  const [page,           setPage]           = useState(1)
+  const [pageSize,       setPageSize]       = useState(50)
 
   function resetPage() { setPage(1) }
 
-  const createChar       = useMutation(api.catalog.createCharacter)
-  const editChar         = useMutation(api.catalog.editCharacter)
-  const deleteChar       = useMutation(api.catalog.deleteCharacter)
+  const createChar        = useMutation(api.catalog.createCharacter)
+  const editChar          = useMutation(api.catalog.editCharacter)
+  const deleteChar        = useMutation(api.catalog.deleteCharacter)
   const setCharacterImage = useMutation(api.catalog.setCharacterImage)
   const clearCharImage    = useMutation(api.catalog.clearCharacterImage)
+  const markReviewed      = useMutation(api.catalog.markCharacterReviewed)
 
   const stats = useQuery(api.catalog.getCatalogStats)
   const chars = useQuery(api.catalog.searchCharacters, {
     diversityTags: activeTag ? [activeTag] : undefined,
     enrichedOnly,
+    needsReview: onlyNeedsReview ? true : undefined,
     limit: 2000,
   }) as CharDoc[] | undefined
 
@@ -436,7 +459,7 @@ export default function CharactersPage() {
                 {[
                   { label: 'Total',     value: stats.characters.toLocaleString(),          color: '#1e293b' },
                   { label: 'Con CV',    value: stats.charactersEnriched.toLocaleString(),  color: '#6366f1' },
-                  { label: 'Completo',  value: `${Math.round((stats.charactersEnriched / Math.max(stats.characters, 1)) * 100)}%`, color: '#059669' },
+                  { label: 'Revisar',   value: (stats.charactersNeedsReview ?? 0).toLocaleString(), color: '#d97706' },
                 ].map(s => (
                   <div key={s.label} className="rounded-xl px-3 py-2 text-center" style={{ background: '#fff', border: '1px solid #e2e8f0' }}>
                     <p className="text-lg font-bold" style={{ color: s.color }}>{s.value}</p>
@@ -493,6 +516,16 @@ export default function CharactersPage() {
             Solo con datos CV
           </button>
 
+          <button onClick={() => { setOnlyNeedsReview(v => !v); resetPage() }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={onlyNeedsReview
+              ? { background: '#451a03', border: '1px solid #92400e', color: '#fbbf24' }
+              : { background: '#fff', border: '1px solid #e2e8f0', color: '#64748b' }
+            }
+          >
+            {stats?.charactersNeedsReview ? `! Revisar (${stats.charactersNeedsReview})` : '! Revisar'}
+          </button>
+
           {chars && (
             <span className="text-xs text-slate-400 ml-auto">{filtered.length.toLocaleString()} personajes</span>
           )}
@@ -514,6 +547,7 @@ export default function CharactersPage() {
                       char={c}
                       onEdit={() => { setEditTarget(c); setShowForm(true) }}
                       onDelete={() => handleDelete(c._id)}
+                      onMarkReviewed={() => markReviewed({ id: c._id })}
                     />
                   ))}
                 </div>
