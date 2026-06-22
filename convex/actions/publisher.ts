@@ -80,13 +80,23 @@ async function corePublish(
   } catch (error) {
     if (error instanceof Error) {
       errorMessage = error.message
-      // tumblr.js/got wraps HTTP errors — capture body for debugging
       const anyErr = error as any
-      if (anyErr.response?.body) {
-        try { errorMessage += ' | body: ' + JSON.stringify(anyErr.response.body) } catch {}
-      }
-      if (anyErr.body) {
-        try { errorMessage += ' | body: ' + JSON.stringify(anyErr.body) } catch {}
+      // tumblr.js v3 error shape: statusCode + body (parsed JSON)
+      const detail =
+        anyErr.body?.errors?.[0]?.detail ??
+        anyErr.body?.meta?.msg ??
+        anyErr.body?.error ??
+        anyErr.response?.body ??
+        anyErr.data ??
+        null
+      if (detail != null) {
+        try { errorMessage += ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 300) } catch {}
+      } else {
+        // Fallback: dump all enumerable error props to catch any structure
+        try {
+          const full = JSON.stringify(error, Object.getOwnPropertyNames(error))
+          if (full.length > 2) errorMessage += ' — ' + full.slice(0, 400)
+        } catch {}
       }
     } else {
       errorMessage = String(error)
@@ -200,7 +210,8 @@ export const retryFailedSlot = action({
   handler: async (ctx, args): Promise<{ queued: boolean; error?: string }> => {
     const slot = await ctx.runQuery(internal.scheduleSlots.getByIdInternal, { id: args.slotId }) as any | null
     if (!slot) return { queued: false, error: 'Slot no encontrado' }
-    if (slot.status !== 'failed') return { queued: false, error: `Slot no está en estado fallido (estado actual: ${slot.status})` }
+    if (!slot.contentItemId) return { queued: false, error: 'Slot sin contenido asignado' }
+    if (['published', 'publishing'].includes(slot.status)) return { queued: false, error: `Slot ya publicado` }
 
     await ctx.runMutation(internal.scheduleSlots.updateStatusInternal, {
       id: args.slotId, status: 'ready',

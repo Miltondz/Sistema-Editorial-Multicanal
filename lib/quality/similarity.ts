@@ -16,7 +16,7 @@ export function jaccardSimilarity(a: string, b: string): number {
   if (setA.size === 0 && setB.size === 0) return 1
   if (setA.size === 0 || setB.size === 0) return 0
   let intersection = 0
-  for (const t of setA) if (setB.has(t)) intersection++
+  Array.from(setA).forEach(t => { if (setB.has(t)) intersection++ })
   const union = setA.size + setB.size - intersection
   return intersection / union
 }

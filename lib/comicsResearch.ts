@@ -1,3 +1,4 @@
+import { jsonrepair } from 'jsonrepair'
 import type { SearchParams, ComicsResearchResponse, Confidence } from './comicsResearch.types'
 
 const PERPLEXITY_MODEL = 'perplexity/sonar' as const
@@ -235,6 +236,15 @@ export function buildUserPrompt(params: SearchParams): string {
 
   const maxImagesLine = `Return at most ${params.maxImagesPerResult ?? 3} images per result.`
 
+  const characterLines = params.characterContext?.length
+    ? [
+        'DIVERSITY FOCUS: Prioritize comics where the protagonist or main cast is Black, Latino, Asian, Indigenous, Arab, or from other racial/ethnic minorities.',
+        'Do NOT default to LGBTQ+ representation — only include LGBTQ content when no racial/ethnic diversity options are available for this date range.',
+        `Example diverse characters that may have relevant comics: ${params.characterContext.slice(0, 15).join(', ')}, and similar characters.`,
+        'These are EXAMPLES of the diversity type to seek — find ANY comics featuring racial/ethnic diverse characters in this period, not only these specific names.',
+      ].join('\n')
+    : 'DIVERSITY FOCUS: Prioritize racial/ethnic diversity (Black, Latino, Asian, Indigenous, Arab) over LGBTQ+ representation.'
+
   return [
     'Find comics with diversity representation matching these parameters:',
     `date_mode: "${params.dateMode}"`,
@@ -245,6 +255,8 @@ export function buildUserPrompt(params: SearchParams): string {
     confidenceLine,
     imagesLine,
     maxImagesLine,
+    '',
+    characterLines,
     '',
     'Return JSON matching the schema exactly. No other text.',
   ].filter(Boolean).join('\n')
@@ -264,6 +276,15 @@ function applyFilters(parsed: ComicsResearchResponse, params: SearchParams): Com
 
   results = results.slice(0, params.maxResults)
   return { ...parsed, results, count: results.length }
+}
+
+// Repair missing commas in LLM-generated JSON.
+// JSON values end with: " (string), } (object), ] (array), 0-9 (number), e (true/false), l (null)
+// Next token can be " (key/string), { (object), [ (array)
+function repairMissingCommas(s: string): string {
+  return s
+    .replace(/(["}\]0-9el])([ \t]*\r?\n[ \t]*)(["{\[])/g, '$1,$2$3')  // add missing commas
+    .replace(/,(\s*[}\]])/g, '$1')                                       // remove trailing commas
 }
 
 export function parseSearchResponse(raw: string, params: SearchParams): ComicsResearchResponse {
@@ -289,7 +310,31 @@ export function parseSearchResponse(raw: string, params: SearchParams): ComicsRe
       if (Array.isArray(parsed.results) && parsed.results.length > 0) {
         return applyFilters(parsed, params)
       }
-    } catch { /* fall through */ }
+      // Valid JSON but empty results — return it rather than falling through
+      if (Array.isArray(parsed.results)) return applyFilters(parsed, params)
+    } catch (e) {
+      const msg = (e as Error).message ?? ''
+      console.error('[comicsResearch] strategy1 parse error:', msg.slice(0, 200))
+      const posMatch = msg.match(/position (\d+)/)
+      if (posMatch) {
+        const pos = parseInt(posMatch[1])
+        console.error(`[comicsResearch] around error (${pos-50}:${pos+50}):`, cleaned.slice(Math.max(0, pos-50), pos+50))
+      }
+    }
+  }
+
+  // Strategy 1.5: jsonrepair then reparse full JSON
+  if (objStart !== -1 && objEnd > objStart) {
+    try {
+      const repaired = jsonrepair(cleaned.slice(objStart, objEnd + 1))
+      const parsed = JSON.parse(repaired) as ComicsResearchResponse
+      if (Array.isArray(parsed.results)) {
+        console.log(`[comicsResearch] strategy1.5 jsonrepair → ${parsed.results.length} results`)
+        return applyFilters(parsed, params)
+      }
+    } catch (e) {
+      console.error('[comicsResearch] strategy1.5 failed:', (e as Error).message?.slice(0, 150))
+    }
   }
 
   // Strategy 2: model returned only the results array
@@ -309,16 +354,47 @@ export function parseSearchResponse(raw: string, params: SearchParams): ComicsRe
     } catch { /* fall through */ }
   }
 
-  // Strategy 3: try full cleaned string as-is (model may have returned valid JSON with no prose)
-  try {
-    const parsed = JSON.parse(cleaned) as ComicsResearchResponse
-    if (Array.isArray(parsed.results)) {
-      return applyFilters(parsed, params)
+  // Strategy 4: per-object walker — handles truncated outer JSON, repairs each object individually
+  const resultsKeyMatch = cleaned.match(/"results"\s*:\s*\[/)
+  if (resultsKeyMatch?.index !== undefined) {
+    const arrayStart = cleaned.indexOf('[', resultsKeyMatch.index)
+    const slice = cleaned.slice(arrayStart)
+    const validResults: unknown[] = []
+    let depth = 0, s4ObjStart = -1, inStr = false, escape = false
+    for (let i = 0; i < slice.length; i++) {
+      const c = slice[i]
+      if (escape)             { escape = false; continue }
+      if (c === '\\' && inStr){ escape = true;  continue }
+      if (c === '"')          { inStr = !inStr;  continue }
+      if (inStr) continue
+      if (c === '{') { if (depth === 0) s4ObjStart = i; depth++ }
+      else if (c === '}') {
+        depth--
+        if (depth === 0 && s4ObjStart !== -1) {
+          const candidate = slice.slice(s4ObjStart, i + 1)
+          let p: unknown = null
+          try { p = JSON.parse(candidate) } catch {
+            try { p = JSON.parse(jsonrepair(candidate)) } catch (e2) {
+              console.error(`[comicsResearch] s4 repair failed: ${(e2 as Error).message?.slice(0, 100)}`)
+            }
+          }
+          if (p !== null) validResults.push(p)
+          s4ObjStart = -1
+        }
+      }
     }
-  } catch { /* fall through */ }
+    if (validResults.length > 0) {
+      console.log(`[comicsResearch] strategy4 recovered ${validResults.length} objects`)
+      return applyFilters({
+        query: { date_mode: params.dateMode, date_from: params.dateFrom, date_to: params.dateTo, max_results: params.maxResults },
+        sources_used: [], count: validResults.length,
+        results: validResults as ComicsResearchResponse['results'],
+      }, params)
+    }
+  }
 
-  console.error('[comicsResearch] all parse strategies failed')
-  console.error('[comicsResearch] raw (first 1000):', raw.slice(0, 1000))
+  console.error('[comicsResearch] all strategies failed. raw[:1000]:', raw.slice(0, 1000))
+  console.error('[comicsResearch] raw[-500:]:', raw.slice(-500))
   return empty
 }
 

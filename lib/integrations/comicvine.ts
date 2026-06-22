@@ -53,7 +53,7 @@ export interface CVCharacter {
   birth?:       string
   powers?:      Array<{ id: number; name: string }>
   creators?:    Array<{ id: number; name: string }>
-  first_appeared_in_issue?: CVRef & { volume?: CVRef }
+  first_appeared_in_issue?: CVRef & { volume?: CVRef; issue_number?: string }
   count_of_issue_appearances?: number
   site_detail_url?: string
 }
@@ -189,7 +189,12 @@ export async function getIssue(id: number): Promise<CVIssue> {
 // ── List endpoints ────────────────────────────────────────────────────────
 
 // dateFrom/dateTo format: YYYY-MM-DD
-export async function getRecentIssues(dateFrom: string, dateTo: string, limit = 20): Promise<CVIssue[]> {
+// Note: CV's /issues/ endpoint does not support publisher filtering — returns all publishers
+export async function getRecentIssues(
+  dateFrom: string,
+  dateTo: string,
+  limit = 20
+): Promise<CVIssue[]> {
   return cvFetch<CVIssue[]>('/issues/', {
     filter:     `cover_date:${dateFrom}|${dateTo}`,
     sort:       'cover_date:desc',
@@ -198,23 +203,84 @@ export async function getRecentIssues(dateFrom: string, dateTo: string, limit = 
   })
 }
 
-export async function getPublisherVolumes(publisherId: number, limit = 20): Promise<CVVolume[]> {
-  return cvFetch<CVVolume[]>('/volumes/', {
-    filter:     `publisher:${publisherId}`,
-    sort:       'date_last_updated:desc',
-    limit:      String(limit),
-    field_list: 'id,name,deck,image,publisher,start_year,count_of_issues,person_credits,site_detail_url',
+// Note: CV's /volumes/ list endpoint does not support publisher:id filtering.
+// This uses the search endpoint with the publisher name as keyword — not an exact filter.
+export async function getPublisherVolumes(publisherName: string, limit = 20): Promise<CVSearchResult[]> {
+  return searchComicVine(publisherName, ['volume'], limit)
+}
+
+// Get volumes a character appears in, filtered by year range.
+// Uses CV /volumes/ list endpoint with character_credits filter.
+export async function getVolumesByCharacterId(
+  characterId: number,
+  opts: { yearFrom?: number; yearTo?: number; limit?: number } = {}
+): Promise<CVSearchResult[]> {
+  const params: Record<string, string> = {
+    filter:     `character_credits:${characterId}`,
+    sort:       'start_year:desc',
+    limit:      String(opts.limit ?? 10),
+    field_list: 'id,name,deck,image,publisher,start_year,count_of_issues,site_detail_url',
+  }
+  const results = await cvFetch<CVSearchResult[]>('/volumes/', params)
+  return results.filter(vol => {
+    const year = vol.start_year ? parseInt(vol.start_year) : null
+    if (!year) return !opts.yearFrom && !opts.yearTo
+    if (opts.yearFrom && year < opts.yearFrom - 1) return false
+    if (opts.yearTo   && year > opts.yearTo + 1)   return false
+    return true
   })
+}
+
+// publisher IDs for major US publishers — search endpoint doesn't reliably return publishers
+export const KNOWN_PUBLISHER_IDS: Record<string, number> = {
+  'Marvel':            31,
+  'Marvel Comics':     31,
+  'DC':                10,
+  'DC Comics':         10,
+  'Image':              6,
+  'Image Comics':       6,
+  'Dark Horse':        14,
+  'Dark Horse Comics': 14,
+  'IDW':                8,
+  'IDW Publishing':     8,
+  'Boom':              68,
+  'BOOM! Studios':     68,
+  'Oni Press':         24,
+  'Fantagraphics':     49,
+  'Milestone':         10,  // Milestone imprint of DC
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+// Strip issue number, year, volume qualifier from comic title before CV search
+function cleanComicTitle(title: string): string {
+  return title
+    .replace(/\s*#\d+(\.\d+)?/g, '')       // remove #1, #12, #1.5
+    .replace(/\s*\(\d{4}\)/g, '')           // remove (2016)
+    .replace(/\s+Vol\.?\s*\d+/gi, '')       // remove Vol.1, Vol 2
+    .replace(/\s+Issue\s+\d+/gi, '')        // remove Issue 1
+    .trim()
+}
+
+// Pick best volume from search results: exact name > most issues > first
+function pickBestVolume(results: CVSearchResult[], cleanTitle: string): CVSearchResult {
+  const lower = cleanTitle.toLowerCase()
+  const exact = results.find(r => r.name?.toLowerCase() === lower)
+  if (exact) return exact
+  // Sort by issue count descending — the canonical run has the most issues
+  const sorted = [...results].sort((a, b) => (b.count_of_issues ?? 0) - (a.count_of_issues ?? 0))
+  return sorted[0]
 }
 
 // ── Higher-level compositions ─────────────────────────────────────────────
 
 // Search + get detail in one call. Returns null if not found.
 export async function findVolume(title: string, publisher?: string): Promise<CVVolume | null> {
-  const query = publisher ? `${title} ${publisher}` : title
-  const results = await searchComicVine(query, ['volume'], 5)
+  const clean = cleanComicTitle(title)
+  const query = publisher ? `${clean} ${publisher}` : clean
+  const results = await searchComicVine(query, ['volume'], 10)
   if (!results.length) return null
-  const best = results.find(r => r.name?.toLowerCase() === title.toLowerCase()) ?? results[0]
+  const best = pickBestVolume(results, clean)
   return getVolume(best.id)
 }
 
@@ -232,11 +298,21 @@ export async function findPerson(name: string): Promise<CVPerson | null> {
   return getPerson(best.id)
 }
 
+// CV search endpoint doesn't reliably return publishers — use /publishers/ list with filter
 export async function searchPublisher(name: string): Promise<{ id: number; name: string } | null> {
-  const results = await searchComicVine(name, ['publisher'], 3)
-  if (!results.length) return null
-  const best = results.find(r => r.name?.toLowerCase().includes(name.toLowerCase())) ?? results[0]
-  return { id: best.id, name: best.name }
+  // Fast path: known publisher
+  const knownId = KNOWN_PUBLISHER_IDS[name]
+  if (knownId) return { id: knownId, name }
+  // Slow path: /publishers/ filter endpoint
+  try {
+    const results = await cvFetch<Array<{ id: number; name: string }>>('/publishers/', {
+      filter:     `name:${name}`,
+      field_list: 'id,name',
+      limit:      '3',
+    })
+    if (results.length) return { id: results[0].id, name: results[0].name }
+  } catch { /* fall through */ }
+  return null
 }
 
 // ── Enrichment helper ─────────────────────────────────────────────────────
@@ -270,16 +346,21 @@ export async function enrichFromComicVine(
   publisher?: string,
   contentType?: string
 ): Promise<CVEnrichmentResult | null> {
+  const isComic = !contentType || contentType === 'comic' || contentType === 'novela_grafica'
   const resources: CVResource[] =
     contentType === 'personaje' ? ['character'] :
     contentType === 'autor'     ? ['person'] :
-    ['volume', 'issue']
+    ['volume']   // comics: volumes only — issues rarely have person_credits in list endpoint
 
-  const query = publisher ? `${title} ${publisher}` : title
-  const results = await searchComicVine(query, resources, 5)
+  // Strip #N, (YYYY), Vol.N from comic titles for cleaner matches
+  const searchTitle = isComic ? cleanComicTitle(title) : title
+  const query = publisher ? `${searchTitle} ${publisher}` : searchTitle
+  const results = await searchComicVine(query, resources, 10)
   if (!results.length) return null
 
-  const best = results.find(r => r.name?.toLowerCase() === title.toLowerCase()) ?? results[0]
+  const best = isComic
+    ? pickBestVolume(results, searchTitle)
+    : (results.find(r => r.name?.toLowerCase() === searchTitle.toLowerCase()) ?? results[0])
 
   const base: CVEnrichmentResult = {
     cvId:         best.id,
@@ -313,7 +394,7 @@ export async function enrichFromComicVine(
       const fa = char.first_appeared_in_issue
       if (fa) {
         base.firstAppearance = fa.volume
-          ? `${fa.volume.name} #${(fa as any).issue_number ?? ''}`
+          ? `${fa.volume.name} #${fa.issue_number ?? ''}`
           : fa.name ?? undefined
       }
       if (!base.coverImageUrl) base.coverImageUrl = char.image?.original_url

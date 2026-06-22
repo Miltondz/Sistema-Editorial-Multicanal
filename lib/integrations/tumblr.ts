@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { createHmac, randomBytes } from 'crypto'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tumblrLib: any = require('tumblr.js')
 
@@ -9,6 +10,96 @@ function createTumblrClient() {
     token:           process.env.TUMBLR_OAUTH_TOKEN!,
     token_secret:    process.env.TUMBLR_OAUTH_TOKEN_SECRET!,
   })
+}
+
+// ── Raw OAuth 1.0a POST (bypasses tumblr.js so we see real error bodies) ────
+
+// RFC 5849: encode everything except ALPHA / DIGIT / "-" / "." / "_" / "~"
+// encodeURIComponent misses: ! * ' ( )
+function oauthEncode(s: string): string {
+  return encodeURIComponent(s)
+    .replace(/!/g, '%21').replace(/\*/g, '%2A')
+    .replace(/'/g, '%27').replace(/\(/g, '%28').replace(/\)/g, '%29')
+}
+
+function oauthSign(
+  method: string,
+  url: string,
+  bodyParams: Record<string, string>,
+  consumerKey: string,
+  consumerSecret: string,
+  token: string,
+  tokenSecret: string,
+): string {
+  const enc = oauthEncode
+  const oauthParams: Record<string, string> = {
+    oauth_consumer_key:     consumerKey,
+    oauth_nonce:            randomBytes(16).toString('hex'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp:        String(Math.floor(Date.now() / 1000)),
+    oauth_token:            token,
+    oauth_version:          '1.0',
+  }
+  // Include body params in signature only for form-encoded content
+  const allParams = { ...oauthParams, ...bodyParams }
+  const sortedStr = Object.entries(allParams)
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+    .map(([k, v]) => `${enc(k)}=${enc(v)}`)
+    .join('&')
+  const baseStr = `${method}&${enc(url)}&${enc(sortedStr)}`
+  const signingKey = `${enc(consumerSecret)}&${enc(tokenSecret)}`
+  const sig = createHmac('sha1', signingKey).update(baseStr).digest('base64')
+  const headerParams = { ...oauthParams, oauth_signature: sig }
+  return 'OAuth ' + Object.entries(headerParams)
+    .map(([k, v]) => `${k}="${enc(v)}"`)
+    .join(', ')
+}
+
+function tumblrCredentials() {
+  return {
+    consumerKey:    process.env.TUMBLR_CONSUMER_KEY!,
+    consumerSecret: process.env.TUMBLR_CONSUMER_SECRET!,
+    token:          process.env.TUMBLR_OAUTH_TOKEN!,
+    tokenSecret:    process.env.TUMBLR_OAUTH_TOKEN_SECRET!,
+  }
+}
+
+async function tumblrRequest(blogName: string, body: string | FormData, sigFields: Record<string, string>): Promise<any> {
+  const { consumerKey, consumerSecret, token, tokenSecret } = tumblrCredentials()
+  const url = `https://api.tumblr.com/v2/blog/${blogName}/post`
+  const isFormEncoded = typeof body === 'string'
+  // Form-encoded: ALL body params in sig. Multipart: NO body in sig (RFC 5849 §3.4.1.3).
+  const authHeader = oauthSign('POST', url, isFormEncoded ? sigFields : {}, consumerKey, consumerSecret, token, tokenSecret)
+  const headers: Record<string, string> = { Authorization: authHeader }
+  if (isFormEncoded) headers['Content-Type'] = 'application/x-www-form-urlencoded'
+  const res = await fetch(url, { method: 'POST', headers, body })
+  const json = await res.json() as any
+  if (!res.ok) throw new Error(`Tumblr ${res.status}: ${JSON.stringify(json).slice(0, 800)}`)
+  return json
+}
+
+// Form-encoded POST (text / link posts)
+async function tumblrLegacyPost(blogName: string, fields: Record<string, string>): Promise<any> {
+  const body = Object.entries(fields)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join('&')
+  return tumblrRequest(blogName, body, fields)
+}
+
+// Multipart POST (photo posts with binary image data)
+async function tumblrLegacyPostPhoto(
+  blogName: string,
+  textFields: Record<string, string>,
+  imageBuffers: Array<{ data: ArrayBuffer; mimeType: string }>,
+): Promise<any> {
+  const form = new FormData()
+  for (const [k, v] of Object.entries(textFields)) form.append(k, v)
+  for (let i = 0; i < imageBuffers.length; i++) {
+    const { data, mimeType } = imageBuffers[i]
+    const ext = mimeType.split('/')[1]?.split(';')[0] ?? 'jpg'
+    form.append(`data[${i}]`, new Blob([data], { type: mimeType }), `image${i}.${ext}`)
+  }
+  return tumblrRequest(blogName, form, {})
 }
 
 // ── Import types ────────────────────────────────────────────────────────────
@@ -156,7 +247,6 @@ export interface TumblrPublishParams {
 export async function publishPost(
   params: TumblrPublishParams
 ): Promise<{ id: string; url: string }> {
-  const client = createTumblrClient()
   let payload: Record<string, unknown>
 
   if (params.type === 'photo') {
@@ -170,14 +260,27 @@ export async function publishPost(
         tags: params.tags.join(','),
       }
     } else {
-      payload = {
-        type: 'photo',
-        // Legacy API source must be a single string URL.
-        // Multi-photo requires base64 data upload — not supported here; use first image.
-        source: imageUrls[0],
-        caption: params.caption ?? '',
-        tags: params.tags.join(','),
-      }
+      // Fetch images as binary and send via multipart/form-data
+      // base64 in form-encoded body → Tumblr detects as text/plain → 400
+      const UA = 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)'
+      const imageBuffers = await Promise.all(
+        imageUrls.slice(0, 10).map(async url => {
+          const res = await fetch(url, { headers: { 'User-Agent': UA } })
+          if (!res.ok) throw new Error(`Image fetch failed ${res.status}: ${url.slice(0, 120)}`)
+          const ct = (res.headers.get('content-type') ?? 'image/jpeg').split(';')[0].trim()
+          if (!ct.startsWith('image/')) throw new Error(`Not an image: "${ct}" from ${url.slice(0, 120)}`)
+          return { data: await res.arrayBuffer(), mimeType: ct }
+        })
+      )
+      const json = await tumblrLegacyPostPhoto(
+        params.blogName,
+        { type: 'photo', caption: params.caption ?? '', tags: params.tags.join(',') },
+        imageBuffers,
+      )
+      const postId = String(json?.response?.id ?? json?.id ?? '')
+      if (!postId) throw new Error(`Tumblr no devolvió ID. Respuesta: ${JSON.stringify(json)}`)
+      const blogHost = params.blogName.includes('.') ? params.blogName : `${params.blogName}.tumblr.com`
+      return { id: postId, url: `https://${blogHost}/post/${postId}` }
     }
   } else if (params.type === 'text') {
     payload = {
@@ -196,14 +299,14 @@ export async function publishPost(
     }
   }
 
-  // createLegacyPost uses the legacy REST API v2 format (type/body/caption/source/tags)
-  // createPost (v5 default) uses NPF format which has a completely different schema
-  const response = await client.createLegacyPost(params.blogName, payload)
-  const postId = String(response?.id ?? response?.Id ?? '')
-  if (!postId) throw new Error(`Tumblr no devolvió ID del post. Respuesta: ${JSON.stringify(response)}`)
+  const fields: Record<string, string> = {}
+  for (const [k, v] of Object.entries(payload)) fields[k] = String(v)
+
+  const json = await tumblrLegacyPost(params.blogName, fields)
+  const postId = String(json?.response?.id ?? json?.id ?? '')
+  if (!postId) throw new Error(`Tumblr no devolvió ID del post. Respuesta: ${JSON.stringify(json)}`)
   const blogHost = params.blogName.includes('.') ? params.blogName : `${params.blogName}.tumblr.com`
-  const postUrl = `https://${blogHost}/post/${postId}`
-  return { id: postId, url: postUrl }
+  return { id: postId, url: `https://${blogHost}/post/${postId}` }
 }
 
 export function selectPostType(

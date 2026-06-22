@@ -37,7 +37,11 @@ export function assembleXTweet(variant: {
 // ── Tumblr / X payload builders ───────────────────────────────────────────
 // Kept pure so they can be unit-tested without the Convex runtime.
 
-import { selectPostType } from '../integrations/tumblr'
+function selectPostType(hasImages: boolean, hasBuyLink: boolean): 'photo' | 'link' | 'text' {
+  if (hasImages) return 'photo'
+  if (hasBuyLink) return 'link'
+  return 'text'
+}
 
 export interface TumblrPayload {
   blogName: string
@@ -84,7 +88,7 @@ export function buildTumblrPayload(
     type:            postType,
     caption:         postType === 'photo' ? fullCaption : undefined,
     body:            postType === 'text'  ? fullCaption : undefined,
-    imageUrls:       postType === 'photo' ? effectiveAssets.map(a => a.publicUrl).slice(0, 1) : undefined,
+    imageUrls:       postType === 'photo' ? effectiveAssets.map(a => a.publicUrl).slice(0, 10) : undefined,
     linkUrl:         postType === 'link'  ? item.buyLink ?? undefined : undefined,
     linkTitle:       postType === 'link'  ? headline : undefined,
     linkDescription: postType === 'link'  ? `${bodyText}\n${TUMBLR_FOOTER}` : undefined,

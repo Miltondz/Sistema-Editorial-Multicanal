@@ -37,3 +37,5 @@ next-env.d.ts
 
 # Claude Code local settings (machine-specific permissions)
 .claude/settings.local.json
+# Added by code-review-graph
+.code-review-graph/

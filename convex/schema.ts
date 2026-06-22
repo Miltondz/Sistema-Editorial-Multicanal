@@ -179,6 +179,7 @@ export default defineSchema({
     priority: v.number(),
     locked: v.boolean(),
     generationBatchId: v.optional(v.string()),
+    scheduledTime: v.optional(v.string()),
     status: slotStatus,
   })
     .index('by_date', ['scheduledFor'])

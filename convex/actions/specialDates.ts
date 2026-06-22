@@ -15,7 +15,7 @@ export const generateIdeas = action({
     entityName:  v.optional(v.string()),  // character or person name for CV lookup
     entityType:  v.optional(v.string()),  // 'character' | 'person'
   },
-  handler: async (ctx, args): Promise<{ ideas: Array<{ title: string; body: string; hashtags: string[] }> }> => {
+  handler: async (ctx, args): Promise<{ ideas: Array<{ title: string; body: string; hashtags: string[]; imagePrompt: string }> }> => {
     const context = args.description ? `Additional context: ${args.description}` : ''
 
     // CV enrichment: fetch structured data for the subject entity
@@ -74,27 +74,35 @@ Each post must follow this 4-paragraph structure:
 3. Specific comic characters — name 3-5 real diverse characters whose stories directly relate to this theme, naming the specific issues they address (e.g. systemic inequality, cultural identity, etc.)
 4. Inspiring close — connects the characters' journeys to real-world meaning; forward-looking but grounded in what already exists
 
-Each body should be approximately 300-400 words. Do NOT include any call to action, future promotion, or self-referential language.
+Each body should be approximately 300-400 words. Separate each paragraph with a blank line (\\n\\n). Do NOT include any call to action, future promotion, or self-referential language.
+
+Also generate a unique image generation prompt for each idea. The image prompt must:
+- Be specific to THAT idea's angle and theme (not generic)
+- Describe a vivid, symbolic visual: a scene, character moment, or powerful composition
+- Reference real characters or visual elements from that post
+- Style: "digital illustration, comic art style, vibrant colors, [specific scene/composition]"
+- 1-2 sentences max
 
 Respond ONLY with valid JSON (no markdown, no code blocks):
 {
   "ideas": [
     {
       "title": "Compelling post title (English, 8-14 words)",
-      "body": "Full 4-paragraph editorial post in plain text (no HTML). ~300-400 words.",
-      "hashtags": ["#Tag1", "#Tag2", "#Tag3", "#Tag4", "#Tag5"]
+      "body": "Full 4-paragraph editorial post in plain text (no HTML). ~300-400 words. Paragraphs separated by \\n\\n.",
+      "hashtags": ["#Tag1", "#Tag2", "#Tag3", "#Tag4", "#Tag5"],
+      "imagePrompt": "Specific image generation prompt for this idea's angle."
     },
-    { "title": "...", "body": "...", "hashtags": ["..."] },
-    { "title": "...", "body": "...", "hashtags": ["..."] }
+    { "title": "...", "body": "...", "hashtags": ["..."], "imagePrompt": "..." },
+    { "title": "...", "body": "...", "hashtags": ["..."], "imagePrompt": "..." }
   ]
 }`
 
     const raw = await complete(systemPrompt, userMessage, 2400)
 
-    const parsed = parseJsonSafe<{ ideas: Array<{ title: string; body: string; hashtags: string[] }> }>(raw)
+    const parsed = parseJsonSafe<{ ideas: Array<{ title: string; body: string; hashtags: string[]; imagePrompt: string }> }>(raw)
 
     const ideas = parsed?.ideas ?? [
-      { title: `Celebrating: ${args.title}`, body: 'A special date in comics history worth remembering.', hashtags: ['#SuperheroesInColor', '#Comics', '#Diversity'] },
+      { title: `Celebrating: ${args.title}`, body: 'A special date in comics history worth remembering.', hashtags: ['#SuperheroesInColor', '#Comics', '#Diversity'], imagePrompt: '' },
     ]
 
     await ctx.runMutation(internal.specialDates.saveIdeas, {

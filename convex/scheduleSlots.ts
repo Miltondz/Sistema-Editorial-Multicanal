@@ -62,7 +62,7 @@ export const listByDateRangeWithItems = query({
       slots.push(...daySlots)
     }
 
-    const itemIds = [...new Set(slots.map(s => s.contentItemId).filter((id): id is NonNullable<typeof id> => !!id))]
+    const itemIds = Array.from(new Set(slots.map(s => s.contentItemId).filter((id): id is NonNullable<typeof id> => !!id)))
     const itemDocs = await Promise.all(itemIds.map(id => ctx.db.get(id)))
     const itemMap = new Map(itemDocs.filter(Boolean).map(doc => [doc!._id as string, doc!]))
 
@@ -349,6 +349,25 @@ export const reschedule = mutation({
   },
 })
 
+// ── setSlotTime — set or clear the exact publication time (HH:MM) ─────────────
+
+export const setSlotTime = mutation({
+  args: {
+    id: v.id('scheduleSlots'),
+    scheduledTime: v.optional(v.string()),  // "HH:MM" or undefined to clear
+  },
+  handler: async (ctx, args) => {
+    const slot = await ctx.db.get(args.id)
+    if (!slot) throw new Error('Slot not found')
+    // Re-queue failed slots so cron picks them up at the new time
+    const resetStatus = slot.status === 'failed' ? 'planned' : undefined
+    await ctx.db.patch(args.id, {
+      scheduledTime: args.scheduledTime,
+      ...(resetStatus ? { status: resetStatus } : {}),
+    })
+  },
+})
+
 // ── createManual — manually add a slot for a specific date/dayPart ────────────
 
 export const createManual = mutation({
@@ -495,11 +514,12 @@ export const getByIdInternal = internalQuery({
   },
 })
 
-// Used by publishCron to find slots due for the current dayPart
+// Used by publishCron — finds slots due at current time
 export const getPlannedForDayPartInternal = internalQuery({
   args: {
     scheduledFor: v.string(),
     dayPart: dayPartV,
+    currentHHMM: v.string(),  // "HH:MM" UTC — zero-padded, e.g. "09:30"
   },
   handler: async (ctx, args): Promise<Doc<'scheduleSlots'>[]> => {
     const channels = ['tumblr', 'x'] as const
@@ -510,14 +530,17 @@ export const getPlannedForDayPartInternal = internalQuery({
         .withIndex('by_date_and_channel', q =>
           q.eq('scheduledFor', args.scheduledFor).eq('channel', channel)
         )
-        .take(10)
+        .take(50)
       for (const slot of slots) {
-        if (
-          slot.dayPart === args.dayPart &&
-          (slot.status === 'planned' || slot.status === 'ready') &&
-          !slot.locked
-        ) {
-          result.push(slot)
+        if (!(slot.status === 'planned' || slot.status === 'ready') || slot.locked) continue
+
+        if (slot.scheduledTime) {
+          // Zero-padded "HH:MM" string comparison is lexicographically correct
+          // Publish when scheduled time has arrived (within the current 10-min cron window)
+          if (slot.scheduledTime <= args.currentHHMM) result.push(slot)
+        } else {
+          // No exact time: publish during the dayPart window
+          if (slot.dayPart === args.dayPart) result.push(slot)
         }
       }
     }

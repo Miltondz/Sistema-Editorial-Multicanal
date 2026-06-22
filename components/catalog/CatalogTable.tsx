@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
-import { useState } from 'react'
 import { OriginBadge } from './OriginBadge'
+import { DeleteBtn } from '@/components/ui/ActionBtn'
 import type { ContentItem, ContentStatus } from '@/lib/types/domain'
 
 const APPROVABLE: ContentStatus[] = ['draft', 'researching', 'in_review']
@@ -52,22 +52,6 @@ const TYPE_LABELS: Record<string, string> = {
   coleccion: 'Colección',
 }
 
-function DeleteButton({ id, onDelete }: { id: string; onDelete: (id: string) => void }) {
-  const [confirm, setConfirm] = useState(false)
-  return (
-    <button
-      onClick={() => { if (confirm) { onDelete(id) } else { setConfirm(true) } }}
-      onBlur={() => setConfirm(false)}
-      className={`text-xs px-2 py-1 rounded font-medium transition-colors ${
-        confirm
-          ? 'bg-red-600 text-white hover:bg-red-500'
-          : 'bg-red-50 text-red-600 hover:bg-red-100'
-      }`}
-    >
-      {confirm ? '¿Eliminar?' : '✕ Eliminar'}
-    </button>
-  )
-}
 
 export function CatalogTable({
   items, isLoading, onLoadMore, canLoadMore,
@@ -186,7 +170,7 @@ export function CatalogTable({
                         Editar
                       </Link>
                       {onDelete && (
-                        <DeleteButton id={id} onDelete={onDelete} />
+                        <DeleteBtn onDelete={() => onDelete(id)} label="Eliminar" />
                       )}
                     </div>
                   </td>

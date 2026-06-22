@@ -11,12 +11,16 @@ function getCurrentDayPart(): 'morning' | 'afternoon' | 'evening' {
 export const publishPendingSlots = internalAction({
   args: {},
   handler: async (ctx): Promise<void> => {
-    const today = new Date().toISOString().slice(0, 10)
+    const now = new Date()
+    const today = now.toISOString().slice(0, 10)
     const dayPart = getCurrentDayPart()
+    const hh = String(now.getUTCHours()).padStart(2, '0')
+    const mm = String(now.getUTCMinutes()).padStart(2, '0')
+    const currentHHMM = `${hh}:${mm}`
 
     const slots = await ctx.runQuery(
       internal.scheduleSlots.getPlannedForDayPartInternal,
-      { scheduledFor: today, dayPart }
+      { scheduledFor: today, dayPart, currentHHMM }
     ) as Array<{ _id: any }>
 
     for (const slot of slots) {

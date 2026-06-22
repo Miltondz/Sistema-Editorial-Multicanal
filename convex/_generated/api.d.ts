@@ -10,6 +10,7 @@
 
 import type * as actions_ai from "../actions/ai.js";
 import type * as actions_comicsResearch from "../actions/comicsResearch.js";
+import type * as actions_comicvine from "../actions/comicvine.js";
 import type * as actions_importer from "../actions/importer.js";
 import type * as actions_publisher from "../actions/publisher.js";
 import type * as actions_scoring from "../actions/scoring.js";
@@ -43,6 +44,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   "actions/ai": typeof actions_ai;
   "actions/comicsResearch": typeof actions_comicsResearch;
+  "actions/comicvine": typeof actions_comicvine;
   "actions/importer": typeof actions_importer;
   "actions/publisher": typeof actions_publisher;
   "actions/scoring": typeof actions_scoring;

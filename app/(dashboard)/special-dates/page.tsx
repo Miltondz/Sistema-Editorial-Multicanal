@@ -6,7 +6,7 @@ import { api } from '@/convex/_generated/api'
 
 type DateType = 'anniversary' | 'one_time'
 type Tab = 'upcoming' | 'all'
-interface Idea { title: string; body: string; hashtags: string[] }
+interface Idea { title: string; body: string; hashtags: string[]; imagePrompt?: string }
 
 // ── Color maps ────────────────────────────────────────────────────────────────
 
@@ -463,6 +463,15 @@ function IdeasSection({
   const developIdea = useAction((api.actions.specialDates as any).developIdea)
   const [developing, setDeveloping] = useState<number | null>(null)
   const [devError, setDevError] = useState<string | null>(null)
+  const [copied, setCopied] = useState<number | null>(null)
+
+  function copyIdea(idea: Idea, idx: number) {
+    const text = `${idea.title}\n\n${idea.body}\n\n${idea.hashtags.join(' ')}`
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(idx)
+      setTimeout(() => setCopied(null), 2000)
+    })
+  }
 
   let ideas: Idea[] = []
   if (d.aiIdeas) {
@@ -506,23 +515,50 @@ function IdeasSection({
       <div className="space-y-2">
         {ideas.map((idea, i) => (
           <div key={i} className="bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <div className="flex items-start justify-between gap-2">
-              <p className="text-xs font-semibold text-gray-800 flex-1">{idea.title}</p>
-              <button
-                type="button"
-                disabled={developing === i}
-                onClick={() => handleDevelop(idea, i)}
-                className="shrink-0 px-2.5 py-1 text-[10px] font-semibold bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
-              >
-                {developing === i ? '⏳ Generando…' : '→ Desarrollar'}
-              </button>
+            {/* Header: title + action buttons */}
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <p className="text-sm font-semibold text-gray-800 flex-1 leading-snug">{idea.title}</p>
+              <div className="flex gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => copyIdea(idea, i)}
+                  title="Copiar al portapapeles"
+                  className="px-2 py-1 text-[10px] font-semibold bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition-colors whitespace-nowrap"
+                >
+                  {copied === i ? '✓ Copiado' : '⧉ Copiar'}
+                </button>
+                <button
+                  type="button"
+                  disabled={developing === i}
+                  onClick={() => handleDevelop(idea, i)}
+                  className="px-2.5 py-1 text-[10px] font-semibold bg-green-600 hover:bg-green-500 text-white rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                >
+                  {developing === i ? '⏳…' : '→ Desarrollar'}
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-gray-600 mt-1">{idea.body}</p>
-            <div className="flex gap-1 mt-1.5 flex-wrap">
+
+            {/* Body: render each paragraph separately */}
+            <div className="space-y-2 mb-2">
+              {idea.body.split(/\n\n+/).map((para, pi) => (
+                <p key={pi} className="text-xs text-gray-600 leading-relaxed">{para.trim()}</p>
+              ))}
+            </div>
+
+            {/* Hashtags */}
+            <div className="flex gap-1 flex-wrap mb-2">
               {idea.hashtags.map((h, hi) => (
                 <span key={hi} className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded">{h}</span>
               ))}
             </div>
+
+            {/* Image prompt */}
+            {idea.imagePrompt && (
+              <div className="mt-2 border-t border-slate-200 pt-2">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Prompt imagen</p>
+                <p className="text-[11px] text-violet-700 bg-violet-50 rounded-lg px-2 py-1.5 leading-relaxed">{idea.imagePrompt}</p>
+              </div>
+            )}
           </div>
         ))}
       </div>

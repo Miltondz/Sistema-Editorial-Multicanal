@@ -10,7 +10,6 @@ import {
   getIssue,
   getRecentIssues,
   getPublisherVolumes,
-  searchPublisher,
   findCharacter,
   enrichFromComicVine,
   type CVResource,
@@ -88,7 +87,7 @@ export const getCharacterContext = action({
 // ── Discovery actions ─────────────────────────────────────────────────────
 
 // Issues by cover_date range — complement to AI comicsResearch
-// dateFrom/dateTo: YYYY-MM-DD
+// Note: CV API does not support publisher filtering on /issues/ — returns all publishers including manga
 export const discoverRecentIssues = action({
   args: {
     dateFrom: v.string(),
@@ -100,16 +99,14 @@ export const discoverRecentIssues = action({
   },
 })
 
-// Browse a publisher's recent catalog
+// Browse a publisher's catalog via search (CV list endpoint doesn't support publisher filter)
 export const getPublisherCatalog = action({
   args: {
     publisherName: v.string(),
     limit:         v.optional(v.number()),
   },
   handler: async (_ctx, args) => {
-    const pub = await searchPublisher(args.publisherName)
-    if (!pub) return { publisher: null, volumes: [] }
-    const volumes = await getPublisherVolumes(pub.id, args.limit)
-    return { publisher: pub, volumes }
+    const volumes = await getPublisherVolumes(args.publisherName, args.limit)
+    return { publisher: { name: args.publisherName }, volumes }
   },
 })

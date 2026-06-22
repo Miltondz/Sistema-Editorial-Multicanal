@@ -4,10 +4,10 @@ import { internal } from './_generated/api'
 
 const crons = cronJobs()
 
-// Hourly: publish planned slots for current day/dayPart
+// Every 10 min: publish planned slots at their scheduled time
 crons.interval(
   'publish pending slots',
-  { hours: 1 },
+  { minutes: 10 },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (internal as any).scheduled.publishCron.publishPendingSlots,
   {}

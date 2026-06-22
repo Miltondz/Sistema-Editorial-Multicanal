@@ -4,6 +4,7 @@ import { useQuery, useAction, useMutation } from 'convex/react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/convex/_generated/api'
 import { ContentEditor } from '@/components/editor/ContentEditor'
+import { DeleteBtn } from '@/components/ui/ActionBtn'
 import type { Id } from '@/convex/_generated/dataModel'
 import type { ContentItem, MediaAsset } from '@/lib/types/domain'
 import { useState } from 'react'
@@ -18,18 +19,16 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
   const deleteItem = useMutation((api.contentItems as any).deleteItem)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recomputeScores = useAction((api.actions as any).scoring.recomputeAllScores)
-  const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
   const [recomputeMsg, setRecomputeMsg] = useState<string | null>(null)
 
   async function handleDelete() {
-    if (!confirmDelete) { setConfirmDelete(true); return }
     setDeleting(true)
     try {
       await deleteItem({ id: params.id as any })
       router.push('/catalog')
-    } catch { setDeleting(false); setConfirmDelete(false) }
+    } catch { setDeleting(false) }
   }
 
   if (data === undefined) {
@@ -62,19 +61,7 @@ export default function EditItemPage({ params }: { params: { id: string } }) {
         <Link href="/catalog" className="text-sm text-indigo-600 hover:text-indigo-800">
           ← Volver al catálogo
         </Link>
-        <button
-          type="button"
-          onClick={handleDelete}
-          onBlur={() => setConfirmDelete(false)}
-          disabled={deleting}
-          className={`text-xs px-3 py-1.5 rounded font-medium transition-colors disabled:opacity-50 ${
-            confirmDelete
-              ? 'bg-red-600 text-white hover:bg-red-500'
-              : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
-          }`}
-        >
-          {deleting ? 'Eliminando…' : confirmDelete ? '¿Confirmar eliminación?' : '✕ Eliminar ítem'}
-        </button>
+        <DeleteBtn onDelete={handleDelete} label={deleting ? 'Eliminando…' : 'Eliminar ítem'} />
       </div>
 
       {/* Score summary chips */}

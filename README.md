@@ -38,10 +38,12 @@ CMS editorial construido para gestionar y publicar contenido sobre superhéroes 
 - Todos los ítems importados entran en estado `in_review` con `needsReview=true` — sin excepciones
 
 ### Investigación y asistencia IA
-- **Investigación de cómics** con IA: búsqueda por rango de fechas, publisher y parámetros libres
+- **Investigación de cómics diversidad** — dos modos complementarios:
+  - *AI search*: GPT-4o-search encuentra cómics reales por rango de fechas y tags de diversidad (`black`, `latino`, `asian`, `indigenous`, `arab`); reparación automática de JSON malformado vía `jsonrepair`
+  - *Character search*: consolida 1500+ personajes de Wikipedia + worldofblackheroes.com, prioriza 60+ personajes prominentes, busca en Comic Vine sus series y enriquece con poderes / primera aparición / portadas
 - **Extracción automática** de metadatos (título, tipo, personajes, creadores, tags) desde el texto del post original
 - **Sugerencia de etiquetas** de representación y temáticas
-- **Generación de variantes** de publicación por canal (Claude / Gemini)
+- **Generación de variantes** de publicación por canal (Claude)
 
 ### Media assets
 - Subida de imágenes a Convex Storage con extracción de dimensiones en cliente (`window.Image`)
@@ -75,7 +77,7 @@ CMS editorial construido para gestionar y publicar contenido sobre superhéroes 
 | Backend / DB | [Convex](https://convex.dev) (queries, mutations, actions, storage, scheduler) |
 | Autenticación | `@convex-dev/auth` |
 | Rich text | Tiptap |
-| IA | Anthropic Claude (`@anthropic-ai/sdk`), OpenAI (`openai`) |
+| IA | Anthropic Claude (`@anthropic-ai/sdk`), OpenAI (`openai`), OpenRouter |
 | Publicación | `tumblr.js` (Tumblr API), `twitter-api-v2` (X API v2) |
 | Testing | Vitest |
 
@@ -111,10 +113,13 @@ convex/
     ai.ts                 ← Generación y extracción con IA
     importer.ts           ← Importación desde Tumblr
     comicvine.ts          ← Acciones públicas que exponen el cliente Comic Vine al frontend
+    comicsResearch.ts     ← Búsqueda de cómics: AI search (GPT-4o-search) + character-first (Wikipedia+CV)
 
 lib/
   integrations/
     comicvine.ts          ← Cliente Comic Vine API (search, character, volume, person, issue)
+  comicsResearch.ts       ← Parser de respuestas AI con jsonrepair + estrategias de fallback
+  comicsResearch.types.ts ← Tipos SearchParams / ComicsResearchResponse
   preview/
     payloads.ts           ← Funciones puras: assembleXTweet, buildFullTumblrCaption, buildTumblrPayload, buildXPayload
     payloads.test.ts      ← 29 tests
@@ -146,6 +151,8 @@ lib/
 | `specialDates` | Fechas editoriales especiales con enriquecimiento IA |
 | `importJobs` | Trabajos de importación con progreso y estado |
 | `scoringRules` | Reglas de scoring configurables por canal |
+| `comicsResearch` | Sesiones de búsqueda de cómics con resultados y estado |
+| `comicsResearchItems` | Resultados individuales por sesión con metadatos y JSON original |
 
 ---
 
@@ -183,6 +190,7 @@ ANTHROPIC_API_KEY
 OPENAI_API_KEY
 PERPLEXITY_API_KEY
 COMICVINE_API_KEY
+OPENROUTER_API_KEY
 ```
 
 ### Iniciar en desarrollo

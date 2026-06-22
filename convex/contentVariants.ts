@@ -183,6 +183,29 @@ export const applyGeneration = internalMutation({
 
     let versionNumber = 1
     if (existing) {
+      // Never deactivate a published variant — it is a permanent record
+      if (existing.status === 'published') {
+        versionNumber = existing.versionNumber + 1
+        // Insert new variant without touching the published one
+        const variantId = await ctx.db.insert('contentVariants', {
+          contentItemId: args.contentItemId,
+          channel: args.channel,
+          headline: args.headline,
+          bodyText: args.bodyText,
+          ctaText: args.ctaText,
+          selectedMediaIds: [],
+          status: 'generated',
+          versionNumber,
+          isActive: false, // published one keeps isActive=true
+        })
+        await ctx.runMutation(internal.auditEvents.log, {
+          entityType: 'contentVariant',
+          entityId: variantId,
+          eventType: 'variant.generated',
+          payloadJson: { channel: args.channel, contentItemId: args.contentItemId },
+        })
+        return variantId
+      }
       await ctx.db.patch(existing._id, { isActive: false })
       versionNumber = existing.versionNumber + 1
     }

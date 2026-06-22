@@ -12,6 +12,17 @@ export const listByItem = query({
   },
 })
 
+export const listBySlot = query({
+  args: { slotId: v.id('scheduleSlots') },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query('publicationLog')
+      .filter(q => q.eq(q.field('slotId'), args.slotId))
+      .order('desc')
+      .take(5)
+  },
+})
+
 export const create = internalMutation({
   args: {
     slotId: v.optional(v.id('scheduleSlots')),
@@ -116,7 +127,7 @@ export const getCalendarData = query({
       byDate.set(key, entry)
     }
 
-    return [...byDate.entries()].map(([date, counts]) => ({
+    return Array.from(byDate.entries()).map(([date, counts]) => ({
       date,
       tumblr: counts.tumblr,
       x: counts.x,

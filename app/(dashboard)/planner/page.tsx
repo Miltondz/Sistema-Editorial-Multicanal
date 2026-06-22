@@ -4,6 +4,7 @@ import { api } from '@/convex/_generated/api'
 import Link from 'next/link'
 import { useState, useRef } from 'react'
 import CalendarGenerateModal from '@/components/planner/CalendarGenerateModal'
+import { ActionBtn, DeleteBtn, ACTION_VARIANTS } from '@/components/ui/ActionBtn'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -484,6 +485,7 @@ export default function PlannerPage() {
       {selectedSlot && (
         <SlotDetailModal
           slot={selectedSlot}
+          allSlots={rawSlots as any[] ?? []}
           onClose={() => { setSelectedSlot(null); setActionMsg(null) }}
           onPublishNow={() => handlePublishNow(selectedSlot)}
           onReschedule={(d, dp) => handleReschedule(selectedSlot, d, dp)}
@@ -657,6 +659,29 @@ function WeekBand({
   )
 }
 
+function IconBtn({ title, onClick, disabled, className, children }: {
+  title: string
+  onClick: () => void
+  disabled?: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={`relative group w-8 h-8 flex items-center justify-center rounded text-base disabled:opacity-40 transition-colors ${className ?? ''}`}
+    >
+      {children}
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 text-[11px] bg-gray-800 text-white rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-50">
+        {title}
+      </span>
+    </button>
+  )
+}
+
 // ── SlotPill ──────────────────────────────────────────────────────────────────
 
 function SlotPill({
@@ -695,7 +720,10 @@ function SlotPill({
         <span className="text-[9px] font-semibold opacity-80">
           {slot.item?.contentType ?? '—'}
         </span>
-        {slot.contentMode === 'recycled' && (
+        {slot.scheduledTime && (
+          <span className="text-[9px] text-indigo-600 font-mono ml-auto">{slot.scheduledTime}</span>
+        )}
+        {!slot.scheduledTime && slot.contentMode === 'recycled' && (
           <span className="text-[9px] bg-amber-100 text-amber-600 px-0.5 rounded ml-auto">♻</span>
         )}
       </div>
@@ -709,10 +737,12 @@ function SlotPill({
 // ── SlotDetailModal ───────────────────────────────────────────────────────────
 
 function SlotDetailModal({
-  slot, onClose, onPublishNow, onReschedule, onToggleLock, onUnassign, onDelete, onRetry, actionMsg,
+  slot, allSlots, onClose, onPublishNow, onReschedule, onToggleLock, onUnassign, onDelete, onRetry, actionMsg,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slot: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  allSlots: any[]
   onClose: () => void
   onPublishNow: () => void
   onReschedule: (date: string, dayPart: DayPart) => void
@@ -725,171 +755,238 @@ function SlotDetailModal({
   const [newDate,    setNewDate]    = useState<string>(slot.scheduledFor)
   const [newDayPart, setNewDayPart] = useState<DayPart>(slot.dayPart)
   const [publishing, setPublishing] = useState(false)
-  const [showDelete, setShowDelete] = useState(false)
+  const [slotTime,   setSlotTime]   = useState<string>(slot.scheduledTime ?? '')
+  const [savingTime, setSavingTime] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const setSlotTimeMutation = useMutation(api.scheduleSlots.setSlotTime as any)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pubLogs = useQuery((api.publicationLog as any).listBySlot, { slotId: slot._id }) as any[] | undefined
 
   const canPublishNow = slot.contentItemId && !['published', 'publishing'].includes(slot.status)
   const canReschedule = !slot.locked && !['publishing', 'published'].includes(slot.status)
   const dateChanged   = newDate !== slot.scheduledFor || newDayPart !== slot.dayPart
 
+  // Conflict: other slot on same date+channel with same time (excluding this slot)
+  const timeConflict = slotTime
+    ? allSlots.find(s =>
+        s._id !== slot._id &&
+        s.scheduledFor === slot.scheduledFor &&
+        s.channel === slot.channel &&
+        s.scheduledTime === slotTime &&
+        !['published', 'skipped', 'failed'].includes(s.status)
+      )
+    : null
+
+  async function handleSaveTime() {
+    setSavingTime(true)
+    try {
+      await setSlotTimeMutation({ id: slot._id, scheduledTime: slotTime || undefined })
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSavingTime(false)
+    }
+  }
+
+  const channelAccent = slot.channel === 'tumblr' ? 'bg-indigo-600' : 'bg-gray-800'
+  const channelLabel  = slot.channel === 'tumblr' ? 'Tumblr' : 'X / Twitter'
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      {/* Horizontal layout: left = details, right = actions */}
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden flex flex-row" onClick={e => e.stopPropagation()}>
 
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">
-              {slot.scheduledFor} · {DAY_PART_LABELS[slot.dayPart as DayPart]}
-              <span className="text-xs text-gray-400 ml-1">{DAY_PART_HOURS[slot.dayPart as DayPart]}</span>
-            </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Canal: {slot.channel === 'tumblr' ? 'Tumblr' : 'X'}
-              {slot.locked && <span className="ml-2 text-amber-600">🔒 Bloqueado</span>}
-            </p>
+        {/* ── LEFT: details ── */}
+        <div className="flex-1 min-w-0 flex flex-col">
+
+          {/* Top strip */}
+          <div className={`${channelAccent} px-5 py-3 flex items-center justify-between`}>
+            <div className="flex items-center gap-3">
+              <span className="text-white font-semibold text-sm">{channelLabel}</span>
+              <span className="text-white/50">·</span>
+              <span className="text-white/80 text-sm">{slot.scheduledFor}</span>
+              <span className="text-white/50">·</span>
+              <span className="text-white/80 text-sm">{DAY_PART_LABELS[slot.dayPart as DayPart]}</span>
+              {slot.scheduledTime && (
+                <span className="text-white font-medium text-sm">{slot.scheduledTime} UTC</span>
+              )}
+              {slot.locked && <span className="text-[11px] bg-white/20 text-white px-1.5 py-0.5 rounded">🔒</span>}
+            </div>
+            <button onClick={onClose} className="text-white/50 hover:text-white text-lg leading-none transition-colors">✕</button>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
-        </div>
 
-        {/* Content */}
-        <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-          {slot.item ? (
-            <>
-              <p className="text-sm font-medium text-gray-900">{slot.item.title}</p>
-              <p className="text-xs text-gray-500 mt-0.5 capitalize">{slot.item.contentType}</p>
-              <div className="flex gap-2 mt-2">
-                <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[slot.status] ?? ''}`}>
-                  {STATUS_LABELS[slot.status] ?? slot.status}
-                </span>
-                {slot.contentMode === 'recycled' && (
-                  <span className="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700">♻ Reciclado</span>
+          {/* Scrollable body */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+            {/* Content card */}
+            <div className="flex gap-3 items-start">
+              {slot.item?.coverImageUrl && (
+                <img
+                  src={slot.item.coverImageUrl}
+                  alt=""
+                  className="w-16 h-20 rounded-lg object-cover flex-shrink-0 border border-gray-200 shadow-sm"
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                {slot.item ? (
+                  <>
+                    <p className="text-sm font-semibold text-gray-900 leading-snug">{slot.item.title}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 capitalize">{slot.item.contentType}</p>
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[slot.status] ?? ''}`}>
+                        {STATUS_LABELS[slot.status] ?? slot.status}
+                      </span>
+                      {slot.contentMode === 'recycled' && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">♻ Reciclado</span>
+                      )}
+                    </div>
+                    {slot.item._id && (
+                      <Link href={`/catalog/${slot.item._id}`}
+                        className="text-xs text-indigo-600 hover:underline font-medium mt-2 block"
+                        onClick={onClose}>
+                        Abrir en editor →
+                      </Link>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-400 italic">Sin contenido asignado</p>
                 )}
               </div>
-              {slot.item._id && (
-                <Link href={`/catalog/${slot.item._id}`}
-                  className="text-xs text-indigo-600 hover:underline mt-1 block"
-                  onClick={onClose}>
-                  Abrir en editor →
-                </Link>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-gray-400 italic">Sin contenido asignado</p>
-          )}
+            </div>
+
+            {/* Time picker */}
+            {canReschedule && (
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Hora (UTC)</label>
+                <div className="flex gap-2 items-center">
+                  <input type="time" value={slotTime} onChange={e => setSlotTime(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm text-gray-900 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                  <button type="button" onClick={handleSaveTime}
+                    disabled={savingTime || slotTime === (slot.scheduledTime ?? '')}
+                    className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40 whitespace-nowrap transition-colors">
+                    {savingTime ? '…' : 'Guardar'}
+                  </button>
+                  {slotTime && (
+                    <button type="button" title="Quitar hora"
+                      onClick={() => { setSlotTime(''); setSlotTimeMutation({ id: slot._id, scheduledTime: undefined }) }}
+                      className="w-8 h-9 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">✕</button>
+                  )}
+                </div>
+                {timeConflict && (
+                  <p className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    ⚠ Conflicto: otro slot a las {slotTime}{timeConflict.item?.title ? ` (${timeConflict.item.title})` : ''}.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Reschedule */}
+            {canReschedule && (
+              <div>
+                <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Reprogramar</label>
+                <div className="flex gap-2">
+                  <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm text-gray-900 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+                  <select value={newDayPart} onChange={e => setNewDayPart(e.target.value as DayPart)}
+                    className="px-3 py-2 text-sm text-gray-900 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                    {DAY_PARTS.map(dp => <option key={dp} value={dp}>{DAY_PART_LABELS[dp]}</option>)}
+                  </select>
+                </div>
+                {dateChanged && (
+                  <button type="button" onClick={() => onReschedule(newDate, newDayPart)}
+                    className="mt-2 w-full px-3 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                    Confirmar cambio de fecha
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Publication log */}
+            {pubLogs && pubLogs.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Historial</p>
+                <div className="space-y-1.5">
+                  {pubLogs.slice(0, 3).map((log: any) => (
+                    <div key={log._id} className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs ${
+                      log.publishStatus === 'success'
+                        ? 'bg-green-50 text-green-800 border border-green-100'
+                        : 'bg-red-50 text-red-800 border border-red-100'
+                    }`}>
+                      <span className="font-bold flex-shrink-0">{log.publishStatus === 'success' ? '✓' : '✗'}</span>
+                      <span className="flex-1 min-w-0 break-all">
+                        {log.externalPostUrl
+                          ? <a href={log.externalPostUrl} target="_blank" rel="noopener noreferrer" className="underline">{log.externalPostUrl}</a>
+                          : (log.errorMessage ?? log.publishStatus)
+                        }
+                      </span>
+                      <span className="flex-shrink-0 opacity-50">{new Date(log._creationTime).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  ))}
+                </div>
+                {pubLogs[0]?.errorMessage?.includes('ariante') && slot.item?._id && (
+                  <Link href={`/catalog/${slot.item._id}`} className="text-indigo-600 text-xs font-medium hover:underline mt-2 block" onClick={onClose}>
+                    → Aprobar variante en el editor
+                  </Link>
+                )}
+              </div>
+            )}
+
+            {/* Feedback */}
+            {actionMsg && (
+              <div className={`px-3 py-2.5 rounded-lg text-xs border ${
+                actionMsg.startsWith('Error')
+                  ? 'bg-red-50 border-red-200 text-red-700'
+                  : 'bg-green-50 border-green-200 text-green-800'
+              }`}>
+                {actionMsg}
+                {actionMsg.includes('ariante') && slot.item?._id && (
+                  <Link href={`/catalog/${slot.item._id}`} className="block mt-1 underline font-medium" onClick={onClose}>
+                    → Ir al editor a aprobar variante
+                  </Link>
+                )}
+                {actionMsg.includes('probado') && slot.item?._id && (
+                  <Link href={`/catalog/${slot.item._id}`} className="block mt-1 underline font-medium" onClick={onClose}>
+                    → Ir al editor a aprobar el ítem
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Reschedule */}
-        {canReschedule && (
-          <div className="mb-4">
-            <p className="text-xs font-medium text-gray-700 mb-2">Reprogramar</p>
-            <div className="flex gap-2">
-              <input
-                type="date"
-                value={newDate}
-                onChange={e => setNewDate(e.target.value)}
-                className="flex-1 px-2 py-1.5 text-sm text-gray-900 bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              />
-              <select
-                value={newDayPart}
-                onChange={e => setNewDayPart(e.target.value as DayPart)}
-                className="px-2 py-1.5 text-sm text-gray-900 bg-white border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              >
-                {DAY_PARTS.map(dp => (
-                  <option key={dp} value={dp}>{DAY_PART_LABELS[dp]}</option>
-                ))}
-              </select>
-            </div>
-            {dateChanged && (
-              <button
-                type="button"
-                onClick={() => onReschedule(newDate, newDayPart)}
-                className="mt-2 w-full px-3 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-              >
-                Confirmar cambio de fecha
-              </button>
-            )}
-          </div>
-        )}
+        {/* ── RIGHT: actions panel ── */}
+        <div className="w-44 flex-shrink-0 bg-gray-50 border-l border-gray-100 flex flex-col gap-2 p-4">
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1">Acciones</p>
 
-        {/* Feedback */}
-        {actionMsg && (
-          <div className={`mb-3 px-3 py-2 rounded text-xs border ${
-            actionMsg.startsWith('Error')
-              ? 'bg-red-50 border-red-200 text-red-700'
-              : 'bg-green-50 border-green-200 text-green-800'
-          }`}>
-            {actionMsg}
-            {actionMsg.includes('ariante') && slot.item?._id && (
-              <Link href={`/catalog/${slot.item._id}`} className="block mt-1 underline font-medium" onClick={onClose}>
-                → Ir al editor a aprobar variante
-              </Link>
-            )}
-            {actionMsg.includes('probado') && slot.item?._id && (
-              <Link href={`/catalog/${slot.item._id}`} className="block mt-1 underline font-medium" onClick={onClose}>
-                → Ir al editor a aprobar el ítem
-              </Link>
-            )}
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex flex-col gap-2">
-          {slot.status === 'failed' && (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="w-full px-4 py-2 text-sm font-medium bg-amber-600 text-white rounded-md hover:bg-amber-700"
-            >
-              ↺ Reintentar publicación
-            </button>
-          )}
           {canPublishNow && (
-            <button
-              type="button"
+            <ActionBtn
               disabled={publishing}
               onClick={async () => { setPublishing(true); await onPublishNow(); setPublishing(false) }}
-              className="w-full px-4 py-2 text-sm font-medium bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+              variant="green" icon={publishing ? '⏳' : '▶'} full
             >
-              {publishing ? 'Publicando…' : 'Publicar ahora'}
-            </button>
+              {publishing ? 'Publicando…' : 'Publicar'}
+            </ActionBtn>
           )}
-
-          <button
-            type="button"
-            onClick={onToggleLock}
-            className="w-full px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
-          >
-            {slot.locked ? '🔓 Desbloquear' : '🔒 Bloquear slot'}
-          </button>
-
+          {(slot.status === 'failed' || slot.status === 'planned' || slot.status === 'ready') && slot.contentItemId && (
+            <ActionBtn onClick={onRetry} variant="amber" icon="↺" full>Reintentar</ActionBtn>
+          )}
+          <ActionBtn onClick={onToggleLock} variant="ghost" icon={slot.locked ? '🔓' : '🔒'} full>
+            {slot.locked ? 'Desbloquear' : 'Bloquear'}
+          </ActionBtn>
           {slot.contentItemId && !slot.locked && !['published', 'publishing'].includes(slot.status) && (
-            <button
-              type="button"
-              onClick={onUnassign}
-              className="w-full px-4 py-2 text-sm border border-amber-200 text-amber-700 rounded-md hover:bg-amber-50"
-            >
-              Desasignar contenido
-            </button>
+            <ActionBtn onClick={onUnassign} variant="ghost" icon="⊗" full>Desasignar</ActionBtn>
           )}
+
+          <div className="flex-1" />
+
+          <ActionBtn onClick={onClose} variant="ghost" icon="✕" full>Cerrar</ActionBtn>
 
           {!slot.locked && !['published', 'publishing'].includes(slot.status) && (
-            showDelete ? (
-              <div className="flex gap-2">
-                <button type="button" onClick={onDelete}
-                  className="flex-1 px-3 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">
-                  Confirmar eliminación
-                </button>
-                <button type="button" onClick={() => setShowDelete(false)}
-                  className="flex-1 px-3 py-2 text-sm border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50">
-                  Cancelar
-                </button>
-              </div>
-            ) : (
-              <button type="button" onClick={() => setShowDelete(true)}
-                className="w-full px-4 py-2 text-sm border border-red-200 text-red-600 rounded-md hover:bg-red-50">
-                Eliminar slot
-              </button>
-            )
+            <DeleteBtn onDelete={onDelete} label="Eliminar slot" full />
           )}
         </div>
+
       </div>
     </div>
   )

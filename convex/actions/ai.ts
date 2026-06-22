@@ -165,9 +165,10 @@ export const researchContent = action({
     const { parsed, sourcesUsed } = result
     const { confidence, sourcesUsed: _s, ...proposedItem } = parsed
 
-    // CV enrichment — best-effort, never throws
+    // CV enrichment — only for relevant content types, best-effort, never throws
+    const CV_TYPES = new Set(['comic', 'personaje', 'autor', 'libro'])
     try {
-      if (proposedItem.title) {
+      if (proposedItem.title && args.contentType && CV_TYPES.has(args.contentType)) {
         const cv = await enrichFromComicVine(
           proposedItem.title as string,
           proposedItem.publisher as string | undefined,
@@ -228,16 +229,23 @@ export const generateVariant = action({
     }) as any | null
     if (!item) throw new Error('Item not found')
 
-    // If comic has a cvId and no manual creators, pull real credits from Comic Vine
+    // Pull CV data: creators + description/deck for source material
     let cvCreators: Array<{ name: string; role: string }> = []
-    if (item.cvId && item.contentType === 'comic' && !item.creators?.length) {
+    let cvDescription = ''
+    if (item.cvId && item.contentType === 'comic') {
       try {
         const vol = await getVolume(item.cvId as number)
-        if (vol.person_credits?.length) {
+        if (!item.creators?.length && vol.person_credits?.length) {
           cvCreators = vol.person_credits.map((pc: any) => ({
             name: pc.name,
             role: cvRoleToCreatorRole(pc.role),
           }))
+        }
+        // Use CV deck/description as source when item has no description
+        const raw = vol.description || vol.deck || ''
+        if (raw) {
+          // Strip HTML tags for clean plain text
+          cvDescription = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 600)
         }
       } catch {}
     }
@@ -246,14 +254,43 @@ export const generateVariant = action({
       ? item.creators
       : cvCreators
 
+    // Fetch Wikipedia summaries for each creator in parallel (verified bios only)
+    const wikiSummaries: Record<string, string> = {}
+    if (creatorsSource.length) {
+      await Promise.all(
+        creatorsSource
+          .filter(c => c.role === 'writer' || c.role === 'artist' || c.role === 'cover_artist')
+          .slice(0, 4)
+          .map(async c => {
+            try {
+              const res = await fetch(
+                `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(c.name)}`,
+                { headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)' } }
+              )
+              if (res.ok) {
+                const data = await res.json() as { extract?: string; type?: string }
+                if (data.type !== 'disambiguation' && data.extract) {
+                  wikiSummaries[c.name] = data.extract.split('. ').slice(0, 2).join('. ') + '.'
+                }
+              }
+            } catch {}
+          })
+      )
+    }
+
     const creatorsText = creatorsSource.length
-      ? creatorsSource.map((c: any) => `${c.name} (${c.role})`).join(', ')
-        + (cvCreators.length && !item.creators?.length ? ' [source: Comic Vine]' : '')
-      : 'not listed in database — research from your training knowledge'
+      ? creatorsSource.map((c: any) => {
+          const bio = wikiSummaries[c.name]
+          return bio ? `${c.name} (${c.role}): ${bio}` : `${c.name} (${c.role})`
+        }).join('\n')
+        + (cvCreators.length && !item.creators?.length ? '\n[source: Comic Vine]' : '')
+      : 'none — omit creator paragraph'
 
     const reprTags = item.representationTags?.join(', ') || 'not specified'
     const themeTags = item.themeTags?.join(', ') || ''
-    const description = item.longDescription ?? item.summary ?? ''
+    const itemDesc = item.longDescription ?? item.summary ?? ''
+    const description = itemDesc || cvDescription
+    const descSource = !itemDesc && cvDescription ? ' [source: Comic Vine]' : ''
     const franchise = item.franchise ? `Franchise/Universe: ${item.franchise}` : ''
     const publisher = item.publisher ? `Publisher: ${item.publisher}` : ''
     const link = item.buyLink ?? ''
@@ -271,7 +308,7 @@ Type: ${item.contentType}
 Year: ${yearHint || 'unknown'}
 ${franchise}
 ${publisher}
-Description: ${description}
+Description${descSource}: ${description || 'none provided — use title, tags, and characters only; do NOT invent plot details'}
 Creators listed: ${creatorsText}
 Representation: ${reprTags}
 Themes: ${themeTags}
@@ -287,17 +324,18 @@ Format by type:
 
 ═══ BODY TEXT (HTML — STRICT RULES) ═══
 Structure: MAX 3 <p> blocks total. No exceptions.
-  1. <p><i>One-sentence logline or hook in italics — specific, no vague superlatives</i></p>
-  2. <p>1–2 sentences: story/premise OR specific representation angle — concrete, names identities directly</p>
-  3. <p>Creator paragraph: name the writer and artist by <b>Name</b>, their nationality or background if known, 1–2 notable other works or awards. If buy link: end this paragraph or add a buy line: <p>Get it <a href="${link || '#'}">here</a></p></p>
-  If no buy link, paragraph 3 is still the creator paragraph.
+  1. <p><i>One-sentence hook in italics — must be a specific plot beat, creative choice, or concrete fact from the Description. NOT a restatement of the title. NOT a generic "this issue explores X".</i></p>
+  2. ONLY include if the Description field contains specific plot details, concrete events, or named supporting characters to reference. If Description is empty, vague, or only restates the title/character name, SKIP this paragraph entirely. When included: 1–2 sentences using only facts stated in the Description. DO NOT mention creators here — they belong only in paragraph 3. DO NOT summarize who the main character is — the reader already knows from the title.
+  3. <p>Creator paragraph: use ONLY the "Creators listed" data below. Names, roles, and any bio text are pre-verified. Use <b>Name</b> on first mention. If buy link provided, end with <a href="${link || '#'}">here</a>.</p>
+  If "Creators listed" says "none — omit creator paragraph", skip paragraph 3 entirely.
 
-CREATOR RESEARCH — use your training knowledge:
-  - If "Creators listed" above contains names, expand on those specific people: their nationality, background, notable other works, awards (Eisner, Harvey, Ringo, Hugo, GLYPH, etc.) if you know them.
-  - If creators are not listed, ACTIVELY research: name the writer and lead artist for this specific title from your training knowledge. Be specific — first name, last name.
-  - Name them ONLY if you are CONFIDENT. If uncertain about a specific person, omit them rather than guess.
-  - If you cannot confidently identify ANY creator, OMIT paragraph 3 entirely — do NOT write any sentence about creators being unknown, unlisted, or unavailable.
-  - DO NOT invent credits, awards, or biographical facts you are not confident about.
+SPECIFICITY RULE: Every sentence must contain at least one concrete noun (character name, place, event, issue number, award, publisher imprint). A sentence that could apply to any other comic about the same character is worthless — delete it.
+
+CREATOR RULES — STRICT:
+  - ONLY use creator names and bio text from "Creators listed" below. DO NOT add, infer, or invent any creator name, role, award, other work, or biographical fact from your training knowledge.
+  - Bio text in "Creators listed" is from Wikipedia — quote or paraphrase only that text. No additions.
+  - If a creator has no bio text provided, mention name + role only. Nothing else.
+  - NEVER research or guess creator credits. If not in "Creators listed", it does not exist for this post.
 
 HTML rules:
 - <b> for creator names on first mention
@@ -307,10 +345,10 @@ HTML rules:
 - Tone: curatorial, warm, knowledgeable — NOT activist-lecture, NOT preachy
 
 BANNED PHRASES (do not use, in any form):
-must-read, a must, instant classic, essential reading, you need to read, perfect for fans of, don't miss, highly recommended, stunning, groundbreaking, amazing, incredible (without specific evidence), powerful story (without explaining why), diverse, diversity, minority, creators are unknown, creators are not listed, creators are currently unknown, credits are unavailable, writer is unknown, artist is unknown
+must-read, a must, instant classic, essential reading, you need to read, perfect for fans of, don't miss, highly recommended, stunning, groundbreaking, amazing, incredible (without specific evidence), powerful story (without explaining why), diverse, diversity, minority, explores themes, delves into themes, grapples with, navigates, ongoing journey, showcasing themes, examines themes, what it means to be, the Black superhero experience, the Black experience, creators are unknown, creators are not listed
 
-DO NOT use more than 3 <p> blocks. Trim ruthlessly — 1–2 tight paragraphs with real info beats 3 with filler.
-NEVER write a paragraph just to say creators are unknown. Either name them or skip the paragraph.
+DO NOT use more than 3 <p> blocks. 1–2 paragraphs with real specifics beats 3 with filler.
+NEVER write a paragraph to fill space. If you have nothing specific to say, write nothing.
 
 ═══ CTATEXT (Tumblr tags) ═══
 Comma-separated tag names (NO # prefix). Include: character names, creator surnames, publisher, identity terms, title keywords, franchise, awards if applicable. 8–15 tags, most specific first.
@@ -332,6 +370,7 @@ Type: ${item.contentType}
 Year: ${yearHint || 'unknown'}
 ${franchise}
 ${publisher}
+Description${descSource}: ${description || 'none'}
 Creators: ${creatorsText}
 Representation: ${reprTags}
 
@@ -342,8 +381,9 @@ headline — same title format as Tumblr:
   Film/TV: "Title (Year)"
 
 bodyText — 1 sentence ONLY, max 150 chars, plain text:
-  - Most specific representation angle first: "Black queer protagonist", "written by a Puerto Rican author"
-  - If creators are known/researchable, include: "written by [Name]" or "art by [Name]"
+  - Lead with the story hook, creative angle, or what makes this stand out (premise, genre, award, art style)
+  - If "Creators:" above has names, you may include "written by [Name]" or "art by [Name]" — use ONLY names listed there, no bios
+  - Do NOT name or label any character's or creator's race, ethnicity, gender, or identity — let the story speak
   - Do NOT use: diverse, diversity, minority, must-read, amazing, incredible, stunning, creators unknown
   - No hashtags, no links, no HTML
 

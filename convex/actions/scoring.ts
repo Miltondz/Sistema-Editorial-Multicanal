@@ -115,7 +115,7 @@ export const generateCalendar = action({
         status: first.status,
         inSelectedSet: args.selectedItemIds ? args.selectedItemIds.includes(fId as any) : 'no selection',
         hasVariantInMap: variantMap.has(fId),
-        variantMapKeys: [...variantMap.keys()].slice(0, 3),
+        variantMapKeys: Array.from(variantMap.keys()).slice(0, 3),
       })
     }
 
@@ -159,7 +159,7 @@ export const generateCalendar = action({
 
     console.log('[generateCalendar] DIAG selectedSet', {
       size: selectedSet?.size ?? 'null',
-      firstFew: selectedSet ? [...selectedSet].slice(0, 3) : [],
+      firstFew: selectedSet ? Array.from(selectedSet).slice(0, 3) : [],
     })
 
     const eligible: Candidate[] = []

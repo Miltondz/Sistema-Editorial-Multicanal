@@ -8,6 +8,7 @@ import { OriginBadge } from '@/components/catalog/OriginBadge'
 import { VariantPanel } from '@/components/editor/VariantPanel'
 import { ResearchAssistant } from '@/components/editor/ResearchAssistant'
 import { AILoadingSpinner } from '@/components/ui/AILoadingSpinner'
+import { DeleteBtn } from '@/components/ui/ActionBtn'
 import type {
   ContentItem, ContentType, ContentOrigin, EvergreenClass,
   CreatorRole, Creator, MediaAsset,
@@ -69,6 +70,16 @@ const EVERGREEN_OPTIONS: { value: EvergreenClass; label: string }[] = [
   { value: 'low', label: 'Baja' },
 ]
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Splits "Name (Alias)" into ["Name", "Alias"] — AI often returns this format */
+function expandCharacterNames(names: string[]): string[] {
+  return names.flatMap(name => {
+    const m = name.match(/^(.+?)\s*\((.+)\)$/)
+    return m ? [m[1].trim(), m[2].trim()] : [name]
+  })
+}
+
 // ── MediaUploader ────────────────────────────────────────────────────────────
 
 function getImageDimensions(file: File): Promise<{ width: number; height: number }> {
@@ -84,10 +95,12 @@ function getImageDimensions(file: File): Promise<{ width: number; height: number
 function MediaUploader({
   contentItemId,
   media,
+  coverImageUrl,
   onUploaded,
 }: {
   contentItemId: Id<'contentItems'>
   media: MediaAsset[]
+  coverImageUrl?: string
   onUploaded: () => void
 }) {
   const generateUploadUrl = useMutation(api.mediaAssets.generateUploadUrl)
@@ -96,9 +109,26 @@ function MediaUploader({
   const setPrimary = useMutation(api.mediaAssets.setPrimary)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateAltText = useMutation((api.mediaAssets as any).updateAltText)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const downloadCoverToStorage = useAction((api.actions as any).importer.downloadCoverToStorage)
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [savingOriginal, setSavingOriginal] = useState(false)
   const [altEditing, setAltEditing] = useState<Record<string, string>>({})
+
+  const isConvexUrl = (url: string) => url.includes('convex.cloud') || url.includes('convex.site')
+
+  async function handleUseOriginal() {
+    if (!coverImageUrl) return
+    setSavingOriginal(true)
+    try {
+      await downloadCoverToStorage({ contentItemId })
+    } catch (err) {
+      alert('Error al guardar imagen: ' + (err instanceof Error ? err.message : 'desconocido'))
+    } finally {
+      setSavingOriginal(false)
+    }
+  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -152,6 +182,7 @@ function MediaUploader({
 
   return (
     <div>
+      {/* Uploaded assets */}
       <div className="flex flex-wrap gap-3 mb-3">
         {media.map(asset => (
           <div key={asset._id} className="flex-shrink-0 w-32">
@@ -174,14 +205,7 @@ function MediaUploader({
                     ★
                   </button>
                 )}
-                <button
-                  onClick={() => {
-                    if (confirm('¿Eliminar imagen?')) deleteAsset({ id: asset._id })
-                  }}
-                  className="text-xs text-white bg-red-600 px-1.5 py-0.5 rounded"
-                >
-                  ✕
-                </button>
+                <DeleteBtn onDelete={() => deleteAsset({ id: asset._id })} label="✕" />
               </div>
               {asset.isPrimary && (
                 <span className="absolute bottom-0 left-0 right-0 text-center text-xs bg-indigo-600 text-white rounded-b py-0.5">
@@ -219,6 +243,38 @@ function MediaUploader({
           </div>
         ))}
       </div>
+
+      {/* Original post image — reference strip with option to save as asset */}
+      {coverImageUrl && (
+        <div className="mb-3 flex items-center gap-3 px-3 py-2.5 bg-gray-50 border border-dashed border-gray-300 rounded-lg">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={coverImageUrl}
+            alt="Imagen original del post"
+            className="w-16 h-12 object-cover rounded flex-shrink-0 border border-gray-200"
+            onError={e => { (e.target as HTMLImageElement).parentElement!.style.display = 'none' }}
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-gray-600">Imagen del post original</p>
+            <p className="text-[11px] text-gray-400">
+              {media.length === 0 ? 'Se usará al publicar si no subes otra' : 'Imágenes subidas tienen prioridad'}
+            </p>
+          </div>
+          {!isConvexUrl(coverImageUrl) && (
+            <button
+              type="button"
+              onClick={handleUseOriginal}
+              disabled={savingOriginal}
+              className="flex-shrink-0 px-3 py-1.5 text-xs bg-white border border-gray-300 text-gray-700 rounded hover:border-indigo-400 hover:text-indigo-600 disabled:opacity-50 whitespace-nowrap transition-colors"
+            >
+              {savingOriginal ? 'Guardando…' : '↓ Usar esta imagen'}
+            </button>
+          )}
+          {isConvexUrl(coverImageUrl) && (
+            <span className="flex-shrink-0 text-[11px] text-emerald-600 font-medium whitespace-nowrap">✓ En storage</span>
+          )}
+        </div>
+      )}
 
       {altError && (
         <p className="text-xs text-red-600 mb-2">{altError}</p>
@@ -620,7 +676,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
                         ...(p.summary                       ? { summary: p.summary }                                                                           : {}),
                         ...(p.franchise                     ? { franchise: p.franchise }                                                                       : {}),
                         ...(p.publisher                     ? { publisher: p.publisher }                                                                       : {}),
-                        ...(p.characters?.length            ? { characters: p.characters.join(', ') }                                                         : {}),
+                        ...(p.characters?.length            ? { characters: expandCharacterNames(p.characters as string[]).join(', ') }                   : {}),
                         ...(p.creators?.length              ? { creators: p.creators.map((c: any) => ({ role: c.role as CreatorRole, name: c.name })) }       : {}),
                         ...(p.representationTags?.length    ? { representationTags: p.representationTags.join(', ') }                                         : {}),
                         ...(p.themeTags?.length             ? { themeTags: p.themeTags.join(', ') }                                                           : {}),
@@ -650,7 +706,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
                 ...(proposal.summary              ? { summary: proposal.summary }                                                                          : {}),
                 ...(proposal.franchise            ? { franchise: proposal.franchise }                                                                      : {}),
                 ...(proposal.publisher            ? { publisher: proposal.publisher }                                                                      : {}),
-                ...(proposal.characters?.length   ? { characters: proposal.characters.join(', ') }                                                        : {}),
+                ...(proposal.characters?.length   ? { characters: expandCharacterNames(proposal.characters).join(', ') }                                  : {}),
                 ...(proposal.creators?.length     ? { creators: proposal.creators.map(c => ({ role: c.role as CreatorRole, name: c.name })) }            : {}),
                 ...(proposal.representationTags?.length ? { representationTags: proposal.representationTags.join(', ') }                                  : {}),
                 ...(proposal.themeTags?.length    ? { themeTags: proposal.themeTags.join(', ') }                                                          : {}),
@@ -722,19 +778,10 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
           </Field>
         </div>
 
-        <Field label="Resumen">
+        <Field label="Resumen" hint="Se usa en la generación de posts IA">
           <textarea
             value={form.summary}
             onChange={e => update({ summary: e.target.value })}
-            rows={2}
-            className={INPUT_CLASS}
-          />
-        </Field>
-
-        <Field label="Descripción larga">
-          <textarea
-            value={form.longDescription}
-            onChange={e => update({ longDescription: e.target.value })}
             rows={5}
             className={INPUT_CLASS}
           />
@@ -785,7 +832,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
               placeholder="afrolatino, muslima, LGBTQ+, ..."
             />
             <SuggestTagsButton
-              text={`${form.title} ${form.summary} ${form.longDescription}`}
+              text={[form.title, form.summary, form.characters, form.franchise, form.publisher].filter(Boolean).join(' ')}
               suggestTags={suggestTags}
               onSuggested={({ representationTags, themeTags }) => {
                 if (representationTags.length) update({ representationTags: representationTags.join(', ') })
@@ -941,6 +988,7 @@ export function ContentEditor({ mode, initialItem, onSaved }: ContentEditorProps
           <MediaUploader
             contentItemId={savedId}
             media={initialItem?.media ?? []}
+            coverImageUrl={initialItem?.coverImageUrl}
             onUploaded={() => {/* query refreshes reactively */}}
           />
         </Section>

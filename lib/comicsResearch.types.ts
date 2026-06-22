@@ -22,6 +22,7 @@ export interface SearchParams {
   minConfidence?: Confidence
   requireImages?: boolean
   maxImagesPerResult?: number
+  characterContext?: string[]  // diverse character names to guide AI search
 }
 
 export interface ResearchSource {

@@ -163,6 +163,11 @@ export function ResearchAssistant({ onApply }: ResearchAssistantProps) {
             {proposal.publisher && (
               <Row label="Editorial">{proposal.publisher}</Row>
             )}
+            {proposal.characters && proposal.characters.length > 0 && (
+              <Row label="Personajes">
+                <TagList tags={proposal.characters} color="blue" />
+              </Row>
+            )}
             {proposal.creators && proposal.creators.length > 0 && (
               <Row label="Creadores">
                 {proposal.creators.map(c => `${c.name} (${c.role})`).join(', ')}
