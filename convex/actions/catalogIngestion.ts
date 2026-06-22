@@ -942,6 +942,146 @@ export const addBlindspotAndFixFlashback = action({
   },
 })
 
+// ── Action: batch data quality — clear non-characters + add known diverse chars ──
+
+export const batchDataQualityFix = action({
+  args: {},
+  handler: async (ctx): Promise<{ cleared: number; upserted: number; skipped: number }> => {
+    // CAT A: confirmed non-characters (groups, events, places, real people, series titles)
+    const toClear: string[] = [
+      // Groups / teams
+      'Acolytes', 'Agents of Atlas', 'Agents of S.H.I.E.L.D.', 'All-Star Squadron',
+      'All New X-Men', 'All-New Invaders', 'Alliance of Evil', 'Alpha Flight',
+      'Avengers', 'Avengers Academy', 'Blood Syndicate', 'Champions', 'Counter Force',
+      'Dark X-Men', 'Defenders', 'Defenders of the Earth', 'Exceptional X-Men', 'Excalibur',
+      'Exiles', 'Fantastic Force', 'Femforce', 'Freedom Force', 'Gamma Corps',
+      'Godzilla Squad', 'Great Lakes Avengers', 'Hellfire Club', 'Illuminati',
+      'International Ultramarine Corps', 'Invaders',
+      'Justice League', 'Justice League Dark', 'Justice League Elite',
+      'Justice League Europe', 'Justice League International', 'Justice League Quarterly',
+      'Justice League Task Force', 'Justice League Unlimited', 'Justice League of America',
+      'Justice Society of America', 'New Avengers', 'New Guardians', 'New Mutants',
+      'New Warriors', 'Outsiders', 'People\'s Defense Force', 'Runaways',
+      'Stryke Force', 'Team 7', 'Team Tejas', 'Teen Titans', 'X-Men',
+      'A-Next', 'Astra Force', 'Dinosaur Corps Koseidon',
+      // Events / storylines
+      'Age of X-Man', 'Alternate versions of Wonder Woman', 'Infinity', 'New Universe',
+      // Places / countries
+      'Afghanistan', 'China', 'India', 'Japan', 'Korea', 'Mexico', 'Pakistan',
+      // Organizations / institutions
+      'Daily Planet', 'Hellfire Club',
+      // Real people (creators, actors — should be in catalogCreators)
+      'Adam Warren', 'Alan Heinberg', 'Alex Ross', 'Alex Toth', 'Alexa PenaVega',
+      // Movies / TV shows (not characters)
+      'A Flying Jat', 'Captain Planet',
+    ]
+
+    let cleared = 0, skipped = 0
+    for (const name of toClear) {
+      const ok: boolean = await ctx.runMutation(internal.catalog.patchCharacterTags, { name, diversityTags: [] })
+      if (ok) cleared++; else skipped++
+    }
+
+    // CAT B: confirmed individual diverse characters with high-confidence context
+    const toUpsert = [
+      {
+        name: 'Aisha Campbell',
+        realName: 'Aisha Campbell',
+        publisher: 'Saban Brands / Hasbro',
+        diversityTags: ['black', 'woman'],
+        firstAppearance: 'Mighty Morphin Power Rangers Season 2 Episode 1 (1994)',
+        deck: 'Aisha Campbell is the second Yellow Ranger in Mighty Morphin Power Rangers, replacing Trini Kwan. A Black teenager from Stone Canyon, she is one of the first Black female Power Rangers.',
+        aliases: ['Yellow Ranger (Aisha)'],
+        sources: ['manual'],
+      },
+      {
+        name: 'Adam Park',
+        realName: 'Adam Park',
+        publisher: 'Saban Brands / Hasbro',
+        diversityTags: ['asian'],
+        firstAppearance: 'Mighty Morphin Power Rangers Season 2 Episode 1 (1994)',
+        deck: 'Adam Park is the second Black Ranger in Mighty Morphin Power Rangers, a Korean-American teenager from Stone Canyon who later becomes the Green Zeo Ranger and the Black Turbo Ranger.',
+        aliases: ['Black Ranger (Adam)', 'Zeo Ranger IV Green', 'Black Turbo Ranger'],
+        sources: ['manual'],
+      },
+      {
+        name: 'Aero',
+        realName: 'Lei Ling',
+        publisher: 'Marvel Comics',
+        diversityTags: ['asian', 'woman'],
+        firstAppearance: 'War of the Realms: New Agents of Atlas #1 (2019)',
+        deck: 'Lei Ling is Aero, a Shanghai architect with the power to control wind and air. Created by Zhou Liefen and Greg Pak, she is a core member of the Agents of Atlas and one of Marvel\'s leading Asian superheroines.',
+        aliases: ['Aero (Lei Ling)'],
+        sources: ['manual'],
+        universe: 'Earth-616',
+      },
+      {
+        name: 'America Chavez',
+        realName: 'America Chavez',
+        publisher: 'Marvel Comics',
+        diversityTags: ['latina', 'woman'],
+        firstAppearance: 'Vengeance #1 (2011)',
+        deck: 'America Chavez is a Latin American superhero with superhuman strength and the ability to punch star-shaped portals through the multiverse. She is openly gay and has been a member of the Young Avengers and A-Force.',
+        aliases: ['Miss America', 'Ms. America'],
+        sources: ['manual'],
+        universe: 'Earth-616',
+      },
+      {
+        name: 'Anya Corazon',
+        realName: 'Anya Corazon',
+        publisher: 'Marvel Comics',
+        diversityTags: ['latina', 'woman'],
+        firstAppearance: 'Amazing Fantasy vol.2 #1 (2004)',
+        deck: 'Anya Corazon is Araña, a Mexican-American teenager from Brooklyn with spider-based powers. She later takes the name Spider-Girl and is a key character in the Spider-Verse stories.',
+        aliases: ['Araña', 'Spider-Girl (Anya Corazon)'],
+        sources: ['manual'],
+        universe: 'Earth-616',
+      },
+      {
+        name: 'Acrata',
+        realName: 'Andrea Rojas',
+        publisher: 'DC Comics',
+        diversityTags: ['latina', 'woman'],
+        firstAppearance: 'Superman: Lex 2000 #1 (2000)',
+        deck: 'Andrea Rojas is Acrata, a Mexican anti-corruption activist who gains shadow-teleportation powers from a pre-Columbian symbol. She later joins the Justice League of America.',
+        aliases: ['Acrata (Andrea Rojas)'],
+        sources: ['manual'],
+        universe: 'Prime Earth',
+      },
+      {
+        name: 'Ajak',
+        realName: 'Ajak',
+        publisher: 'Marvel Comics',
+        diversityTags: ['asian'],
+        firstAppearance: 'Eternals #2 (1976)',
+        deck: 'Ajak is an Eternal with healing powers, originally depicted as male and based on the Aztec god Ajax. In the 2021 MCU film Eternals, Ajak was reimagined as a woman of indigenous Latin American descent, played by Salma Hayek.',
+        aliases: ['Ajax', 'Ajak (MCU)'],
+        sources: ['manual'],
+        universe: 'Earth-616',
+      },
+      {
+        name: '009-1',
+        realName: 'Mylene Hoffman',
+        publisher: 'Shotaro Ishinomori / Shueisha',
+        diversityTags: ['asian', 'woman'],
+        firstAppearance: '009-1 manga by Shotaro Ishinomori (1967)',
+        deck: 'Mylene Hoffman (009-1) is a cyborg secret agent in Shotaro Ishinomori\'s manga set in an alternate Cold War universe divided into East and West Blocks. One of the pioneering female cyborg action characters in manga.',
+        aliases: ['Mylene Hoffman', '009-1 (Mylene Hoffman)'],
+        sources: ['manual'],
+      },
+    ]
+
+    let upserted = 0
+    for (const char of toUpsert) {
+      await ctx.runMutation(internal.catalog.upsertCharacter, char)
+      upserted++
+    }
+
+    console.log(`[batch:quality] cleared=${cleared} skipped=${skipped} upserted=${upserted}`)
+    return { cleared, upserted, skipped }
+  },
+})
+
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────
 
 export const runFullIngestion = action({
