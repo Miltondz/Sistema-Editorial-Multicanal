@@ -1,11 +1,11 @@
 "use node";
 
 import { action } from '../_generated/server'
-import { internal } from '../_generated/api'
+import { api, internal } from '../_generated/api'
 import { v } from 'convex/values'
 import { searchComics } from '../../lib/comicsResearch'
 import type { SearchParams, Confidence } from '../../lib/comicsResearch.types'
-import { searchComicVine, findCharacter, getVolumesByCharacterId } from '../../lib/integrations/comicvine'
+import { searchComicVine, findCharacter } from '../../lib/integrations/comicvine'
 
 // ── Character-first search: Wikipedia Category API → CV volumes ───────────
 
@@ -115,7 +115,7 @@ export const searchByDiverseCharacters = action({
     dateTo:        v.optional(v.string()), // YYYY-MM-DD; if omitted, no upper bound
     maxResults:    v.number(),
   },
-  handler: async (_ctx, args): Promise<Array<{
+  handler: async (ctx, args): Promise<Array<{
     character: string
     tags: string[]
     volumes: Array<{
@@ -123,8 +123,17 @@ export const searchByDiverseCharacters = action({
       coverUrl?: string; siteUrl?: string; issueCount?: number
     }>
   }>> => {
-    // Step 1: collect character names from Wikipedia (list pages → category fallback)
-    const tagMap = new Map<string, string[]>() // cleanName → tags
+    type DetailCache = Record<string, { deck?: string; realName?: string; powers?: string[]; firstAppearance?: string }>
+
+    // Step 1: collect character names — catalog first, fall back to live scraping
+    const catalogChars = await ctx.runQuery(api.catalog.searchCharacters, {
+      diversityTags: args.diversityTags,
+      enrichedOnly:  true,
+      limit:         500,
+    })
+
+    const tagMap      = new Map<string, string[]>() // cleanName → tags
+    const detailCache: DetailCache = {}             // catalog pre-fetched data (skips CV char search + findCharacter)
 
     const NOISE_PATTERNS = [
       /characters in/i, /superheroes?/i, /superheroines?/i, /comics?$/i,
@@ -148,43 +157,49 @@ export const searchByDiverseCharacters = action({
         const clean = cleanSourceName(title)
         if (clean.length < 3 || clean.length > 50) continue
         if (isNoiseName(clean)) continue
-        // Skip single-word generic surnames too ambiguous for CV search
         if (/^(Smith|Jones|Brown|Black|White|Green|King|Strong|Powers|Hunter|Steel|Red|Blue)$/i.test(clean)) continue
         if (!tagMap.has(clean)) tagMap.set(clean, [])
         if (!tagMap.get(clean)!.includes(tag)) tagMap.get(clean)!.push(tag)
       }
     }
 
-    async function collectCharactersForTag(tag: string) {
-      // Collect from ALL sources and merge (don't stop at first)
-
-      // Source 1: worldofblackheroes.com for black tag
-      if (tag === 'black') {
-        const names = await fetchWorldOfBlackHeroes()
-        console.log(`[src:black] worldofblackheroes.com → ${names.length} heroes`)
-        addNames(names, tag)
+    if (catalogChars.length >= 20) {
+      // Catalog path: skip all scraping + CV character search
+      console.log(`[charSearch] catalog: ${catalogChars.length} enriched chars — skipping scraping`)
+      for (const c of catalogChars) {
+        tagMap.set(c.name, c.diversityTags)
+        detailCache[c.name] = {
+          deck:            c.deck,
+          realName:        c.realName,
+          powers:          c.powers,
+          firstAppearance: c.firstAppearance,
+        }
       }
+    } else {
+      // Scraping path: catalog insufficient — fetch from Wikipedia + worldofblackheroes.com
+      console.log(`[charSearch] catalog insufficient (${catalogChars.length}), scraping sources`)
 
-      // Source 2: Wikipedia list pages (all of them)
-      const listPages = WIKI_LIST_PAGES[tag] ?? []
-      for (const page of listPages) {
-        const titles = await fetchWikiListPage(page)
-        console.log(`[wiki:${tag}] List:${page} → ${titles.length} links`)
-        addNames(titles, tag)
+      async function collectCharactersForTag(tag: string) {
+        if (tag === 'black') {
+          const names = await fetchWorldOfBlackHeroes()
+          console.log(`[src:black] worldofblackheroes.com → ${names.length} heroes`)
+          addNames(names, tag)
+        }
+        for (const page of WIKI_LIST_PAGES[tag] ?? []) {
+          const titles = await fetchWikiListPage(page)
+          console.log(`[wiki:${tag}] List:${page} → ${titles.length} links`)
+          addNames(titles, tag)
+        }
+        for (const cat of WIKI_CATEGORY_FALLBACK[tag] ?? []) {
+          const titles = await fetchWikiCategory(cat)
+          console.log(`[wiki:${tag}] Category:${cat} → ${titles.length} members`)
+          addNames(titles, tag)
+        }
       }
-
-      // Source 3: Wikipedia categories
-      const cats = WIKI_CATEGORY_FALLBACK[tag] ?? []
-      for (const cat of cats) {
-        const titles = await fetchWikiCategory(cat)
-        console.log(`[wiki:${tag}] Category:${cat} → ${titles.length} members`)
-        addNames(titles, tag)
-      }
+      await Promise.all(args.diversityTags.map(collectCharactersForTag))
     }
 
-    await Promise.all(args.diversityTags.map(collectCharactersForTag))
-
-    console.log(`[charSearch] ${tagMap.size} unique characters from Wikipedia`)
+    console.log(`[charSearch] ${tagMap.size} unique characters from ${catalogChars.length >= 20 ? 'catalog' : 'Wikipedia'}`)
 
     // Parse year bounds from dateFrom/dateTo
     const yearFrom = args.dateFrom ? parseInt(args.dateFrom.slice(0, 4)) : undefined
@@ -225,7 +240,6 @@ export const searchByDiverseCharacters = action({
       const batchOut = await Promise.all(batch.map(async name => {
         try {
           // Step A: search for volumes named after this character
-          // Works well for prominent characters with named series (Black Panther, Storm, Miles Morales...)
           const volHits = await searchComicVine(name, ['volume'], 8)
           if (!volHits.length) return null
           const filtered = volHits.filter(vol => {
@@ -237,21 +251,29 @@ export const searchByDiverseCharacters = action({
             return true
           })
           if (!filtered.length) return null
-          // Sort by year desc to show most recent series first
           filtered.sort((a, b) => parseInt(b.start_year ?? '0') - parseInt(a.start_year ?? '0'))
           const topVolumes = filtered.slice(0, 6)
 
-          // Step B: get character info (deck, realName) for the header card
-          const charHits = await searchComicVine(name, ['character'], 3)
-          const nl = name.toLowerCase()
-          const bestChar = charHits.find(h => h.name?.toLowerCase() === nl) ?? charHits[0]
-          if (bestChar) console.log(`[cv:char] "${name}" → CV "${bestChar.name}" id=${bestChar.id}`)
+          // Step B: get character deck/realName — use catalog cache if available, else CV search
+          const cached = detailCache[name]
+          let deck: string | undefined     = cached?.deck
+          let realName: string | undefined = cached?.realName
+          if (!cached) {
+            const charHits = await searchComicVine(name, ['character'], 3)
+            const nl = name.toLowerCase()
+            const bestChar = charHits.find(h => h.name?.toLowerCase() === nl) ?? charHits[0]
+            if (bestChar) {
+              console.log(`[cv:char] "${name}" → CV "${bestChar.name}" id=${bestChar.id}`)
+              deck     = bestChar.deck
+              realName = bestChar.real_name
+            }
+          }
 
           return {
-            character:      name,
-            tags:           tagMap.get(name) ?? [],
-            deck:           bestChar?.deck,
-            realName:       bestChar?.real_name,
+            character: name,
+            tags:      tagMap.get(name) ?? [],
+            deck,
+            realName,
             volumes: topVolumes.map(vol => ({
               id:         vol.id,
               name:       vol.name,
@@ -275,9 +297,14 @@ export const searchByDiverseCharacters = action({
 
     console.log(`[charSearch] ${results.length} characters with CV volumes — enriching with powers/first appearance`)
 
-    // Step 3: enrich with character detail (powers, first appearance)
-    // deck/realName already in bestChar from search step; only fetch detail for powers + firstAppearance
+    // Step 3: enrich with powers/firstAppearance — skip if already in catalog cache
     await Promise.all(results.map(async r => {
+      const cached = detailCache[r.character]
+      if (cached) {
+        if (cached.powers?.length)    r.powers         = cached.powers
+        if (cached.firstAppearance)   r.firstAppearance = cached.firstAppearance
+        return
+      }
       try {
         const detail = await findCharacter(r.character)
         if (!detail) return
