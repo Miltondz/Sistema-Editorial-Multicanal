@@ -309,7 +309,7 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
           <div className="rounded-2xl overflow-hidden" style={{ height: 320, background: '#0f172a' }}>
             {char.coverUrl
               ? <img src={char.coverUrl} alt={char.name}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover object-top"
                   onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
               : <div className="w-full h-full flex items-center justify-center">
                   <svg className="w-16 h-16 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -474,7 +474,7 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
                         <div className="w-12 h-12 rounded-full overflow-hidden flex items-center justify-center"
                           style={{ background: '#e2e8f0' }}>
                           {v.coverUrl
-                            ? <img src={v.coverUrl} alt={v.name} className="w-full h-full object-cover"
+                            ? <img src={v.coverUrl} alt={v.name} className="w-full h-full object-cover object-top"
                                 onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
                             : <svg className="w-6 h-6 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}

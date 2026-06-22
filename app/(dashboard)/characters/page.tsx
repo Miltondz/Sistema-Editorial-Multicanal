@@ -239,7 +239,7 @@ function CharacterCard({ char, onEdit, onDelete }: {
         <Link href={`/characters/${char._id}`} className="block w-full h-full" style={{ background: '#1e293b' }}>
           {char.coverUrl
             ? <img src={char.coverUrl} alt={char.name}
-                className="w-full h-full object-cover transition-transform hover:scale-105"
+                className="w-full h-full object-cover object-top transition-transform hover:scale-105"
                 loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
             : <div className="w-full h-full flex items-center justify-center hover:bg-slate-700 transition-colors">
                 <svg className="w-10 h-10 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
