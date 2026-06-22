@@ -887,6 +887,29 @@ export const addJoMulleinGreenLanterns = action({
   },
 })
 
+// ── Action: add Rowan Kent (Blue Lantern) + fix Blue Lantern Corps entry ─────
+
+export const addRowanKent = action({
+  args: {},
+  handler: async (ctx): Promise<{ cleared: number; added: number }> => {
+    // Clear group entry — not a character
+    await ctx.runMutation(internal.catalog.patchCharacterTags, { name: 'Blue Lantern Corps', diversityTags: [] })
+
+    await ctx.runMutation(internal.catalog.upsertCharacter, {
+      name:           'Rowan Kent',
+      realName:       'Rowan Kent',
+      publisher:      'DC Comics',
+      diversityTags:  ['black', 'woman'],
+      deck:           'Rowan Kent is a descendant of Superman and member of the Blue Lantern Corps, twin sister of Ronan. She inherits Kryptonian heritage and wields a Blue Lantern ring powered by hope.',
+      aliases:        ['Blue Lantern (Rowan Kent)'],
+      sources:        ['manual'],
+    })
+
+    console.log('[rowan:fix] cleared=1 added=1')
+    return { cleared: 1, added: 1 }
+  },
+})
+
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────
 
 export const runFullIngestion = action({
