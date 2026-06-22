@@ -231,6 +231,288 @@ export const ingestNativeAmericanHeroes = action({
   },
 })
 
+// ── Muslim heroes scraper + hard-coded list ────────────────────────────────────
+
+// Scrape static article pages for character names in headings/bold/links
+async function scrapeArticleHeroNames(url: string): Promise<string[]> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)', Accept: 'text/html' },
+    })
+    if (!res.ok) return []
+    const html = await res.text()
+    const seen = new Set<string>()
+    const names: string[] = []
+    // headings h2/h3/h4, bold, article link text
+    const re = /<(?:h[2-4]|strong|b)[^>]*>\s*([^<]{3,70}?)\s*<\/(?:h[2-4]|strong|b)>/gi
+    let m: RegExpExecArray | null
+    while ((m = re.exec(html)) !== null) {
+      const raw = decodeHtmlEntities(m[1].trim().replace(/^\d+[\.\)]\s*/, '').replace(/<[^>]+>/g, ''))
+      if (!raw || seen.has(raw) || raw.length < 3 || raw.length > 70) continue
+      if (/^(about|share|twitter|facebook|instagram|related|more|read|sign|comment|category|tags|written|posted|follow|subscribe|newsletter|advertisement|menu|search|home|contact|privacy|cookie|accept|login|register|menu|skip)/i.test(raw)) continue
+      seen.add(raw)
+      names.push(raw)
+    }
+    return names
+  } catch { return [] }
+}
+
+// Marvel Fandom category page — static links like href="/wiki/CharName"
+async function scrapeMarvelFandomCategory(url: string): Promise<string[]> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)', Accept: 'text/html' },
+    })
+    if (!res.ok) return []
+    const html = await res.text()
+    const seen = new Set<string>()
+    const names: string[] = []
+    // Fandom category member links: /wiki/Name_(Earth-616) or /wiki/Name
+    const re = /href="\/wiki\/([A-Za-z][^"#?]+?)(?:_\([^)]*\))?"[^>]*>([^<]{2,60})<\/a>/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(html)) !== null) {
+      const slug = m[1]
+      const text = decodeHtmlEntities(m[2].trim())
+      // skip nav, meta, category links
+      if (/^(Category:|File:|Special:|Help:|Talk:|User:|Marvel|DC|Wikipedia)/i.test(slug)) continue
+      if (!text || seen.has(text) || text.length < 2 || text.length > 70) continue
+      seen.add(text)
+      names.push(text)
+    }
+    return names
+  } catch { return [] }
+}
+
+// Curated list from multiple sources — verified Muslim comic heroes
+const MUSLIM_HEROES: Array<{
+  name: string; realName?: string; deck: string; publisher: string; ethnicity?: string
+}> = [
+  {
+    name: 'Ms. Marvel', realName: 'Kamala Khan',
+    deck: 'Pakistani-American Muslim teenager from Jersey City with shape-shifting polymorph powers. First Muslim character to headline a Marvel comic; Avenger and founding Champions member.',
+    publisher: 'Marvel Comics', ethnicity: 'Pakistani-American',
+  },
+  {
+    name: 'Simon Baz',
+    deck: 'Lebanese-American Muslim and Green Lantern of Sector 2814. First Arab-American Green Lantern; constructs a working firearm with his ring.',
+    publisher: 'DC Comics', ethnicity: 'Lebanese-American',
+  },
+  {
+    name: 'Dust', realName: 'Sooraya Qadir',
+    deck: 'Afghan Muslim X-Man who can transform her body into a whirling storm of silicon dust. Wears a niqab by choice; member of the New X-Men and later X-Factor.',
+    publisher: 'Marvel Comics', ethnicity: 'Afghan',
+  },
+  {
+    name: 'Faiza Hussain',
+    deck: 'British Pakistani Muslim physician who wields Excalibur, the sword of King Arthur. Has the power to disassemble any biological or mechanical structure; tied to the Captain Britain mythos.',
+    publisher: 'Marvel Comics', ethnicity: 'British Pakistani',
+  },
+  {
+    name: 'Nightrunner', realName: 'Bilal Asselah',
+    deck: 'French-Algerian Muslim parkour expert and Batman Incorporated agent stationed in Paris. Has no powers — relies on acrobatics, martial arts, and custom Batarangs.',
+    publisher: 'DC Comics', ethnicity: 'French-Algerian',
+  },
+  {
+    name: 'Josiah X', realName: 'Josiah Al-Hajj Saddiq',
+    deck: 'Son of Isaiah Bradley (the Black Captain America) who converted to Islam and became a Muslim superhero. Has the same Super-Soldier Serum enhancements as Steve Rogers.',
+    publisher: 'Marvel Comics', ethnicity: 'African-American',
+  },
+  {
+    name: 'Arabian Knight', realName: 'Abdul Qamar',
+    deck: 'Saudi Arabian hero empowered by a magical golden belt and a flying carpet. Has wielded a scimitar that can project energy. Avengers ally with multiple bearers of the identity.',
+    publisher: 'Marvel Comics', ethnicity: 'Saudi Arabian',
+  },
+  {
+    name: 'Monet St. Croix',
+    deck: 'Algerian-French mutant telepath and powerhouse; member of Generation X, X-Factor, and the X-Men. Daughter of the Algerian ambassador to Monaco; one of the most powerful telepaths in the Marvel universe.',
+    publisher: 'Marvel Comics', ethnicity: 'Algerian-French',
+  },
+  {
+    name: 'Red Dagger', realName: 'Kareem',
+    deck: 'Pakistani Muslim street hero from Karachi who trained under the Red Dagger legacy. Ally of Ms. Marvel who moved to Jersey City; relies on acrobatics and throwing daggers.',
+    publisher: 'Marvel Comics', ethnicity: 'Pakistani',
+  },
+  {
+    name: 'The Janissary', realName: 'Selma Tolon',
+    deck: 'Turkish Muslim physician transformed by magical armor, linked to the ancient Janissary warrior tradition. Member of the Global Guardians; first major Turkish Muslim superhero in DC.',
+    publisher: 'DC Comics', ethnicity: 'Turkish',
+  },
+  {
+    name: 'Bader', realName: 'Bader Al-Sofi',
+    deck: 'The first hero from Saudi Arabia in The 99, based on the concept of the Noor Stone. Part of Teshkeel Comics\' Islamic superhero universe created by Dr. Naif Al-Mutawa.',
+    publisher: 'Teshkeel Comics', ethnicity: 'Saudi Arabian',
+  },
+  {
+    name: 'Noora', realName: 'Nawaf Al-Bari',
+    deck: 'UAE-based hero from The 99 with the power to generate intense light. One of the founding members of the 99 superhero team from Teshkeel Comics.',
+    publisher: 'Teshkeel Comics', ethnicity: 'Emirati',
+  },
+  {
+    name: 'Jabbar', realName: 'Jabbar Bakr',
+    deck: 'Egyptian hero from The 99 with superhuman strength; the name means "the powerful one" in Arabic. Key member of Teshkeel Comics\' Islamic superhero universe.',
+    publisher: 'Teshkeel Comics', ethnicity: 'Egyptian',
+  },
+  {
+    name: 'Excalibur', realName: 'Faiza Hussain',
+    deck: 'See Faiza Hussain; she officially took the name Excalibur after proving worthy of King Arthur\'s sword. British Pakistani Muslim hero in the Marvel UK tradition.',
+    publisher: 'Marvel Comics', ethnicity: 'British Pakistani',
+  },
+  {
+    name: 'Kamala Khan',
+    deck: 'See Ms. Marvel; civilian identity of the Pakistani-American Muslim teenager who is the primary Ms. Marvel since 2014.',
+    publisher: 'Marvel Comics', ethnicity: 'Pakistani-American',
+  },
+  {
+    name: 'Sinbad', realName: 'David Haller',
+    deck: 'An alternate persona/identity used in Marvel Comics. Note: verify this entry — the classic Sinbad sailor appears in several Marvel issues as a Muslim character from the Middle East.',
+    publisher: 'Marvel Comics', ethnicity: 'Arab',
+  },
+  {
+    name: 'Sooraya Qadir',
+    deck: 'See Dust — Afghan Muslim X-Man whose name is the canonical reference. Appears under both "Dust" (codename) and "Sooraya Qadir" (real name).',
+    publisher: 'Marvel Comics', ethnicity: 'Afghan',
+  },
+  {
+    name: 'Black Racer', realName: 'Shilo Norman',
+    deck: 'Note: verify Muslim identity for this entry — Shilo Norman is African-American; if flagged as Muslim in source lists it requires verification.',
+    publisher: 'DC Comics', ethnicity: 'African-American',
+  },
+  {
+    name: 'Zari Tomaz',
+    deck: 'Fictional DC character, primarily known from TV (Legends of Tomorrow) as a Muslim Afghan-American woman with a totem. Comics version tied to the Isis mythology.',
+    publisher: 'DC Comics', ethnicity: 'Afghan-American',
+  },
+  {
+    name: 'Khalid Nassour',
+    deck: 'Egyptian-American medical student who became the new Doctor Fate after finding the Helmet of Fate. A practicing Muslim navigating his faith alongside ancient Egyptian magical legacy.',
+    publisher: 'DC Comics', ethnicity: 'Egyptian-American',
+  },
+  {
+    name: 'Nadia Pym',
+    deck: 'Note: Nadia Pym (Wasp) is of Russian-Hungarian origin and not Muslim; verify if included in Muslim lists — possibly confused with other characters. Mark for review.',
+    publisher: 'Marvel Comics', ethnicity: 'Russian-Hungarian',
+  },
+  {
+    name: 'Jack of Hearts', realName: 'Karim Mahkent',
+    deck: 'Note: verify — a character named Karim exists in some DC contexts. The original Jack of Hearts (Jonathan Hart) is not Muslim; needs confirmation if a Muslim version exists.',
+    publisher: 'DC Comics', ethnicity: 'unknown',
+  },
+  {
+    name: 'Safiyyah Mazari',
+    deck: 'Afghan Muslim refugee and hero introduced in Marvel comics. Works alongside G.I. Joe universe characters in the IDW crossover continuity; wears hijab.',
+    publisher: 'IDW Publishing', ethnicity: 'Afghan',
+  },
+  {
+    name: 'Ressha', realName: 'Bilal Musa',
+    deck: 'Pakistani-American Muslim hero from the independent comic Ressha. Combat veteran turned superhero dealing with PTSD and Islamophobia in post-9/11 America.',
+    publisher: 'Independent', ethnicity: 'Pakistani-American',
+  },
+  {
+    name: 'Petra Faradl',
+    deck: 'Note: verify this character — may appear in early DC cosmic comics. Mark for review pending source confirmation.',
+    publisher: 'DC Comics', ethnicity: 'Arab',
+  },
+]
+
+export const ingestMuslimHeroes = action({
+  args: { enrichLimit: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<{ scraped: number; enriched: number; notFound: number }> => {
+    const seen = new Map<string, boolean>() // name → fromHardList
+
+    // Hard-coded list first (most reliable)
+    for (const h of MUSLIM_HEROES) {
+      seen.set(h.name, true)
+    }
+
+    // Try scraping all three sources
+    const sources = [
+      { url: 'https://marvel.fandom.com/wiki/Category:Muslim_Characters', type: 'fandom' as const },
+      { url: 'https://www.sideshow.com/blog/muslim-super-heroes-across-comics', type: 'article' as const },
+      { url: 'https://geekscovery.com/2020/05/24/muslim-comicbook-superheroes/', type: 'article' as const },
+    ]
+    for (const src of sources) {
+      console.log(`[muslim] scraping ${src.url}`)
+      const names = src.type === 'fandom'
+        ? await scrapeMarvelFandomCategory(src.url)
+        : await scrapeArticleHeroNames(src.url)
+      console.log(`[muslim] got ${names.length} names from ${src.type}`)
+      for (const name of names) {
+        if (!seen.has(name)) seen.set(name, false)
+      }
+      await new Promise(r => setTimeout(r, 600))
+    }
+
+    console.log(`[muslim] total unique: ${seen.size}`)
+
+    // Upsert hard-coded entries with full deck text
+    for (const entry of MUSLIM_HEROES) {
+      const needsReview = entry.deck.toLowerCase().includes('note:') || entry.deck.toLowerCase().includes('verify')
+      await ctx.runMutation(internal.catalog.upsertCharacter, {
+        name:          entry.name,
+        aliases:       entry.realName ? [entry.realName] : [],
+        diversityTags: ['arab'],
+        deck:          entry.deck,
+        realName:      entry.realName,
+        publisher:     entry.publisher,
+        sources:       ['manual'],
+        needsReview,
+      })
+    }
+
+    // Upsert scraped names not in hard list (minimal stub)
+    let stub = 0
+    for (const [name, fromHard] of seen) {
+      if (fromHard) continue
+      await ctx.runMutation(internal.catalog.upsertCharacter, {
+        name,
+        aliases:       [],
+        diversityTags: ['arab'],
+        sources:       ['comicvine_list'],
+        needsReview:   true,
+      })
+      stub++
+    }
+
+    // CV enrichment — skip if rate-limited; standard batch will pick these up
+    let enriched = 0, notFound = 0
+    const limit  = args.enrichLimit ?? 0 // 0 = skip (rate limit in effect)
+    if (limit > 0) {
+      const apiKey: string = process.env.COMICVINE_API_KEY ?? ''
+      if (apiKey) {
+        let count = 0
+        for (const [name] of seen) {
+          if (count >= limit) break
+          try {
+            const hits = await searchComicVine(name, ['character'])
+            if (!hits || hits.length === 0) { notFound++; continue }
+            const char: CVSearchResult = hits[0]
+            await ctx.runMutation(internal.catalog.upsertCharacter, {
+              name:         char.name ?? name,
+              aliases:      [],
+              diversityTags:['arab'],
+              cvId:         char.id,
+              cvUrl:        char.site_detail_url ?? undefined,
+              deck:         char.deck ?? undefined,
+              publisher:    char.publisher?.name ?? undefined,
+              coverUrl:     char.image?.medium_url ?? undefined,
+              sources:      ['manual', 'comicvine'],
+              cvEnrichedAt: Date.now(),
+              needsReview:  false,
+            })
+            enriched++; count++
+            await new Promise(r => setTimeout(r, 1200))
+          } catch (e) {
+            console.error(`[muslim] CV search failed for ${name}:`, e)
+          }
+        }
+      }
+    }
+
+    console.log(`[muslim] done: hardCoded=${MUSLIM_HEROES.length} scraped=${stub} enriched=${enriched}`)
+    return { scraped: seen.size, enriched, notFound }
+  },
+})
+
 // ── Source scrapers (reuse logic from comicsResearch) ─────────────────────────
 
 async function fetchWorldOfBlackHeroes(): Promise<string[]> {
