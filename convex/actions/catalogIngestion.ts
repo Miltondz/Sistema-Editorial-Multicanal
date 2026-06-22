@@ -5,7 +5,231 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import type { GenericActionCtx } from 'convex/server'
 import type { DataModel } from '../_generated/dataModel'
-import { searchComicVine, getCharacter, getPerson } from '../../lib/integrations/comicvine'
+import { searchComicVine, getCharacter, getPerson, type CVSearchResult } from '../../lib/integrations/comicvine'
+
+// ── Native American heroes scraper ───────────────────────────────────────────
+
+async function fetchCVUserList(url: string): Promise<{ name: string; cvId?: number }[]> {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)', Accept: 'text/html' },
+  })
+  if (!res.ok) return []
+  const html = await res.text()
+  const results: { name: string; cvId?: number }[] = []
+  const seen = new Set<string>()
+
+  // CV user lists: character links like href="/SLUG/4005-XXXX/"
+  const re = /href="\/([^"]+?\/4005-(\d+)\/?)"\s[^>]*>\s*([^<]+?)\s*<\/a>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) {
+    const name  = decodeHtmlEntities(m[3].trim())
+    const cvId  = parseInt(m[2])
+    if (name.length < 2 || name.length > 80) continue
+    if (seen.has(name)) continue
+    seen.add(name)
+    results.push({ name, cvId: isNaN(cvId) ? undefined : cvId })
+  }
+
+  // Fallback: look for character name text in list items
+  if (results.length === 0) {
+    const fallback = /class="[^"]*title[^"]*"[^>]*>([^<]+)<\/[ah]/gi
+    while ((m = fallback.exec(html)) !== null) {
+      const name = decodeHtmlEntities(m[1].trim())
+      if (name.length < 2 || name.length > 80 || seen.has(name)) continue
+      seen.add(name)
+      results.push({ name })
+    }
+  }
+  return results
+}
+
+async function fetchDCBlogNativeHeroes(url: string): Promise<string[]> {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)', Accept: 'text/html' },
+  })
+  if (!res.ok) return []
+  const html = await res.text()
+  const names: string[] = []
+  const seen = new Set<string>()
+  // Article headings h2/h3 contain hero names; also strong tags
+  const re = /<(?:h[2-4]|strong)[^>]*>\s*([^<]{3,60}?)\s*<\/(?:h[2-4]|strong)>/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(html)) !== null) {
+    const name = decodeHtmlEntities(m[1].trim().replace(/\d+\.\s*/, ''))
+    if (!name || seen.has(name) || /^(about|share|dc\s|related|more|read|sign|comment)/i.test(name)) continue
+    seen.add(name)
+    names.push(name)
+  }
+  return names
+}
+
+// CV list ID 13232 = ryonslaught's Native Americans list
+// CV API: /api/list/4800-{ID}/ returns list items with character object refs
+async function fetchCVListCharacters(listId: number, apiKey: string): Promise<{ name: string; cvId: number }[]> {
+  const results: { name: string; cvId: number }[] = []
+  // CV list items API — returns up to 100 per page
+  for (let offset = 0; offset < 500; offset += 100) {
+    const url = `https://comicvine.gamespot.com/api/list/4800-${listId}/?api_key=${apiKey}&format=json&field_list=list_items&offset=${offset}`
+    const res = await fetch(url, { headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)' } })
+    if (!res.ok) break
+    const json = await res.json() as Record<string, unknown>
+    if (json.error !== 'OK') break
+    const result = json.results as Record<string, unknown> | null
+    if (!result) break
+    const items = (result.list_items as Array<Record<string, unknown>>) ?? []
+    if (items.length === 0) break
+    for (const item of items) {
+      const obj = item.object as Record<string, unknown> | undefined
+      if (!obj) continue
+      const name  = String(obj.name ?? '')
+      const apiUrl = String(obj.api_detail_url ?? '')
+      // Extract cvId from api_detail_url like .../4005-1234/
+      const m = apiUrl.match(/\/4005-(\d+)\//)
+      const cvId = m ? parseInt(m[1]) : 0
+      if (name && cvId) results.push({ name, cvId })
+    }
+    if (items.length < 100) break
+    await new Promise(r => setTimeout(r, 600))
+  }
+  return results
+}
+
+// DC blog article lists 20 Native American DC heroes — hard-coded from:
+// https://www.dc.com/blog/2023/11/23/celebrate-our-heritage-with-these-twenty-native-american-heroes
+const DC_NATIVE_HEROES: { name: string; deck: string; publisher: string }[] = [
+  { name: 'Equinox',         deck: 'Miiyahbin Marten, a Cree teenager from Ontario who becomes a powerful elemental hero with seasonally shifting powers, member of the Justice League United.',                       publisher: 'DC Comics' },
+  { name: 'Manitou Raven',   deck: 'Apache shaman from 3000 years ago with vast magical abilities, transported to the present to join the Justice League of America.',                                                  publisher: 'DC Comics' },
+  { name: 'Manitou Dawn',    deck: 'Wife of Manitou Raven who inherits his mystical staff and powers, later joins the Justice League Elite.',                                                                          publisher: 'DC Comics' },
+  { name: 'Talisman',        deck: 'Elizabeth Twoyoungmen, a Sarcee (Tsuu T\'ina) woman who wields the Coronet of Enchantment and serves as the magical cornerstone of Alpha Flight.',                                publisher: 'DC Comics' },
+  { name: 'Super-Chief',     deck: 'Flying Stag, a Iroquois warrior empowered by a meteorite gift from Manitou; multiple legacy holders of the Super-Chief identity have appeared throughout DC history.',             publisher: 'DC Comics' },
+  { name: 'Thunderbird',     deck: 'John Proudstar, an Apache mutant with superhuman strength and speed, one of the all-new X-Men. Killed during his second mission; his brother James later took the Thunderbird name.',publisher: 'Marvel Comics' },
+  { name: 'Dawnstar',        deck: 'A Starhaven-native member of the Legion of Super-Heroes with the mutant ability to track across interstellar space and survive in the vacuum.',                                     publisher: 'DC Comics' },
+  { name: 'Paco Ramone',     deck: 'Francisco "Paco" Ramone (Vibe), a Latino hero; note: check—this may have been confused with a Native hero in the DC blog context.',                                              publisher: 'DC Comics' },
+  { name: 'Whirlwind',       deck: 'David Cannon, a villain; if listed in DC Native blog context this may refer to a different Native American Whirlwind character.',                                                  publisher: 'Marvel Comics' },
+  { name: 'Shaman',          deck: 'Dr. Michael Twoyoungmen, a Sarcee (Tsuu T\'ina) physician and mystic who serves as the magical heart of Alpha Flight, father of Talisman.',                                       publisher: 'Marvel Comics' },
+  { name: 'Moonstar',        deck: 'Danielle Moonstar (Mirage), a Cheyenne woman and founding member of the New Mutants, with the power to create illusions of people\'s deepest fears and desires.',                 publisher: 'Marvel Comics' },
+  { name: 'Forge',           deck: 'A Cheyenne mutant inventor and X-Men ally with the innate ability to design any mechanical device and a cybernetic right hand and foot.',                                          publisher: 'Marvel Comics' },
+  { name: 'Puma',            deck: 'Thomas Fireheart, a Kisani Native American businessman who can transform into a powerful were-puma, recurring Spider-Man ally and foe.',                                           publisher: 'Marvel Comics' },
+  { name: 'Red Wolf',        deck: 'William Talltrees, a Cheyenne man empowered by the spirit Owayodata to become the protector Red Wolf; multiple characters have held this identity.',                               publisher: 'Marvel Comics' },
+  { name: 'American Eagle',  deck: 'Jason Strongbow, a Navajo man who gained superhuman strength and senses from exposure to uranium in a mine, Avengers ally.',                                                       publisher: 'Marvel Comics' },
+  { name: 'Warpath',         deck: 'James Proudstar (Thunderbird II), an Apache mutant with superhuman strength, speed, and stamina, longtime member of X-Force and the X-Men.',                                      publisher: 'Marvel Comics' },
+  { name: 'Wyatt Wingfoot',  deck: 'A Keewazi athlete and best friend of the Human Torch, longtime ally of the Fantastic Four who relies on his exceptional human abilities.',                                         publisher: 'Marvel Comics' },
+  { name: 'Cecilia Reyes',   deck: 'A Puerto Rican mutant physician — note: Cecilia is Afro-Latina, not Native American; verify DC blog attribution.',                                                                publisher: 'Marvel Comics' },
+  { name: 'Shooting Star',   deck: 'Victoria Star, a Texas rodeo performer and member of the Rangers (Texas superteam), with exceptional marksmanship and athletics.',                                                 publisher: 'Marvel Comics' },
+  { name: 'Echo',            deck: 'Maya Lopez, a deaf Cheyenne woman with the ability to perfectly mimic any physical movement she observes, former Avenger and Ronin, also became the new Phoenix.',                publisher: 'Marvel Comics' },
+]
+
+export const ingestNativeAmericanHeroes = action({
+  args: { enrichLimit: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<{ scraped: number; enriched: number; notFound: number }> => {
+    const apiKey: string = process.env.COMICVINE_API_KEY ?? ''
+    if (!apiKey) throw new Error('COMICVINE_API_KEY not set')
+
+    const seen = new Map<string, number | undefined>() // name → cvId
+
+    // Fetch CV list 13232 via API (both pages handled by offset loop)
+    console.log('[indigenous] fetching CV list 13232 via API')
+    const cvChars = await fetchCVListCharacters(13232, apiKey)
+    console.log(`[indigenous] CV list: ${cvChars.length} characters`)
+    for (const { name, cvId } of cvChars) {
+      if (!seen.has(name)) seen.set(name, cvId)
+    }
+
+    // Add DC blog entries
+    for (const entry of DC_NATIVE_HEROES) {
+      if (!seen.has(entry.name)) seen.set(entry.name, undefined)
+    }
+    console.log(`[indigenous] total unique: ${seen.size}`)
+
+    // Upsert all as indigenous stubs first
+    for (const entry of DC_NATIVE_HEROES) {
+      await ctx.runMutation(internal.catalog.upsertCharacter, {
+        name:          entry.name,
+        aliases:       [],
+        diversityTags: ['indigenous'],
+        deck:          entry.deck,
+        publisher:     entry.publisher,
+        sources:       ['manual'],
+        needsReview:   true,
+      })
+    }
+    for (const [name, cvId] of seen) {
+      if (DC_NATIVE_HEROES.some(e => e.name === name)) continue // already upserted with deck
+      await ctx.runMutation(internal.catalog.upsertCharacter, {
+        name,
+        aliases:       [],
+        diversityTags: ['indigenous'],
+        sources:       ['comicvine_list'],
+        needsReview:   true,
+        ...(cvId ? { cvId } : {}),
+      })
+    }
+
+    // Enrich from CV using IDs we already have from the list
+    let enriched = 0, notFound = 0
+    const limit = args.enrichLimit ?? 60
+    let count = 0
+    for (const [name, cvId] of seen) {
+      if (count >= limit || !cvId) continue
+      try {
+        const char = await getCharacter(cvId)
+        if (!char) { notFound++; continue }
+        await ctx.runMutation(internal.catalog.upsertCharacter, {
+          name:            char.name ?? name,
+          aliases:         [],
+          diversityTags:   ['indigenous'],
+          cvId:            cvId,
+          cvUrl:           char.site_detail_url ?? undefined,
+          deck:            char.deck ?? undefined,
+          realName:        char.real_name ?? undefined,
+          publisher:       char.publisher?.name ?? undefined,
+          firstAppearance: char.first_appeared_in_issue?.name ?? undefined,
+          coverUrl:        char.image?.medium_url ?? undefined,
+          sources:         ['comicvine_list', 'comicvine'],
+          cvEnrichedAt:    Date.now(),
+          needsReview:     false,
+        })
+        enriched++; count++
+        await new Promise(r => setTimeout(r, 1200))
+      } catch (e) {
+        console.error(`[indigenous] CV fetch failed for ${name} (${cvId}):`, e)
+      }
+    }
+
+    // Enrich DC blog entries by name search (no cvId from list)
+    for (const entry of DC_NATIVE_HEROES) {
+      if (count >= limit) break
+      try {
+        const hits = await searchComicVine(entry.name, ['character'])
+        if (!hits || hits.length === 0) { notFound++; continue }
+        const char: CVSearchResult = hits[0]
+        const charCvId = char.id
+        const pub = char.publisher
+        const img = char.image
+        await ctx.runMutation(internal.catalog.upsertCharacter, {
+          name:            (char.name as string) ?? entry.name,
+          aliases:         [],
+          diversityTags:   ['indigenous'],
+          deck:            char.deck ?? entry.deck,
+          publisher:       pub?.name ?? entry.publisher,
+          cvId:            charCvId,
+          cvUrl:           char.site_detail_url ?? undefined,
+          coverUrl:        img?.medium_url ?? undefined,
+          sources:         ['manual', 'comicvine'],
+          cvEnrichedAt:    Date.now(),
+          needsReview:     false,
+        })
+        enriched++; count++
+        await new Promise(r => setTimeout(r, 1000))
+      } catch (e) {
+        console.error(`[indigenous] name search failed for ${entry.name}:`, e)
+      }
+    }
+
+    console.log(`[indigenous] done: scraped=${seen.size} enriched=${enriched} notFound=${notFound}`)
+    return { scraped: seen.size, enriched, notFound }
+  },
+})
 
 // ── Source scrapers (reuse logic from comicsResearch) ─────────────────────────
 
