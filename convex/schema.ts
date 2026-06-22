@@ -340,4 +340,68 @@ export default defineSchema({
   })
     .index('by_session', ['sessionId'])
     .index('by_saved',   ['saved']),
+
+  // ── Diversity Catalog ──────────────────────────────────────────────────────
+  // Designed for easy export to Supabase / any SQL DB:
+  //   - cvId (integer) = canonical dedup key (not Convex _id)
+  //   - arrays → TEXT[] or JSONB in SQL
+  //   - timestamps → Unix ms, convert to ISO for SQL
+  //   - no v.id() cross-refs between catalog tables (use cvId as FK)
+
+  catalogCharacters: defineTable({
+    // Identity
+    name:            v.string(),              // canonical display name
+    aliases:         v.array(v.string()),     // alternate names / search aliases
+    // Diversity classification
+    diversityTags:   v.array(v.string()),     // ['black','latino','asian','indigenous','arab']
+    // Comic Vine data (primary enrichment source)
+    cvId:            v.optional(v.number()),  // e.g. 1477 for Black Panther
+    cvUrl:           v.optional(v.string()),
+    // Character detail
+    deck:            v.optional(v.string()),  // short CV description
+    realName:        v.optional(v.string()),
+    publisher:       v.optional(v.string()),
+    powers:          v.optional(v.array(v.string())),
+    firstAppearance: v.optional(v.string()),
+    coverUrl:        v.optional(v.string()),
+    // Wikipedia
+    wikiUrl:         v.optional(v.string()),
+    // Provenance
+    sources:         v.array(v.string()),     // ['worldofblackheroes','wikipedia','manual']
+    // Freshness tracking
+    cvEnrichedAt:    v.optional(v.number()),  // Unix ms — null = not yet enriched
+    createdAt:       v.number(),              // Unix ms
+    updatedAt:       v.number(),              // Unix ms
+  })
+    .index('by_name',     ['name'])
+    .index('by_cvId',     ['cvId'])
+    .index('by_enriched', ['cvEnrichedAt']),  // for batch enrichment queries
+
+  catalogCreators: defineTable({
+    // Identity
+    name:            v.string(),
+    aliases:         v.array(v.string()),
+    // Roles & diversity
+    roles:           v.array(v.string()),     // ['writer','artist','colorist','letterer']
+    diversityTags:   v.array(v.string()),     // creator's own diversity background
+    // Comic Vine data
+    cvId:            v.optional(v.number()),
+    cvUrl:           v.optional(v.string()),
+    // Creator detail
+    deck:            v.optional(v.string()),
+    nationality:     v.optional(v.string()),
+    birthYear:       v.optional(v.number()),
+    coverUrl:        v.optional(v.string()),
+    wikiUrl:         v.optional(v.string()),
+    // Notable works (cvIds of volumes/issues)
+    notableWorkCvIds: v.optional(v.array(v.number())),
+    // Provenance
+    sources:         v.array(v.string()),
+    cvEnrichedAt:    v.optional(v.number()),
+    createdAt:       v.number(),
+    updatedAt:       v.number(),
+  })
+    .index('by_name',     ['name'])
+    .index('by_cvId',     ['cvId'])
+    .index('by_enriched', ['cvEnrichedAt']),
 })

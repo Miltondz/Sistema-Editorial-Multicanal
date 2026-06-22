@@ -103,6 +103,7 @@ components/
 
 convex/
   schema.ts               ← Definición completa del esquema de base de datos
+  catalog.ts              ← Queries/mutations del catálogo: upsert, search, export JSON portable
   contentItems.ts         ← CRUD de ítems, búsqueda, bulk ops, sparklines
   contentVariants.ts      ← Variantes por canal
   mediaAssets.ts          ← Gestión de assets con Convex Storage
@@ -114,6 +115,7 @@ convex/
     importer.ts           ← Importación desde Tumblr
     comicvine.ts          ← Acciones públicas que exponen el cliente Comic Vine al frontend
     comicsResearch.ts     ← Búsqueda de cómics: AI search (GPT-4o-search) + character-first (Wikipedia+CV)
+    catalogIngestion.ts   ← Pipeline de ingesta al catálogo: scrape fuentes → upsert → enriquecimiento CV
 
 lib/
   integrations/
@@ -153,6 +155,8 @@ lib/
 | `scoringRules` | Reglas de scoring configurables por canal |
 | `comicsResearch` | Sesiones de búsqueda de cómics con resultados y estado |
 | `comicsResearchItems` | Resultados individuales por sesión con metadatos y JSON original |
+| `catalogCharacters` | Catálogo persistente de personajes diversos: nombre, tags, CV id, poderes, primera aparición, portada |
+| `catalogCreators` | Catálogo persistente de creadores (escritores/artistas): roles, nacionalidad, obras notables |
 
 ---
 
