@@ -9,6 +9,7 @@
  */
 
 import type * as actions_ai from "../actions/ai.js";
+import type * as actions_catalogIngestion from "../actions/catalogIngestion.js";
 import type * as actions_comicsResearch from "../actions/comicsResearch.js";
 import type * as actions_comicvine from "../actions/comicvine.js";
 import type * as actions_importer from "../actions/importer.js";
@@ -17,6 +18,7 @@ import type * as actions_scoring from "../actions/scoring.js";
 import type * as actions_specialDates from "../actions/specialDates.js";
 import type * as auditEvents from "../auditEvents.js";
 import type * as auth from "../auth.js";
+import type * as catalog from "../catalog.js";
 import type * as channelScores from "../channelScores.js";
 import type * as comicsResearch from "../comicsResearch.js";
 import type * as contentItems from "../contentItems.js";
@@ -43,6 +45,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "actions/ai": typeof actions_ai;
+  "actions/catalogIngestion": typeof actions_catalogIngestion;
   "actions/comicsResearch": typeof actions_comicsResearch;
   "actions/comicvine": typeof actions_comicvine;
   "actions/importer": typeof actions_importer;
@@ -51,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   "actions/specialDates": typeof actions_specialDates;
   auditEvents: typeof auditEvents;
   auth: typeof auth;
+  catalog: typeof catalog;
   channelScores: typeof channelScores;
   comicsResearch: typeof comicsResearch;
   contentItems: typeof contentItems;

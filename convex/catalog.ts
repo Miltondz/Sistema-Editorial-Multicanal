@@ -1,4 +1,4 @@
-import { query, internalQuery, internalMutation } from './_generated/server'
+import { query, mutation, internalQuery, internalMutation } from './_generated/server'
 import { v } from 'convex/values'
 
 const now = () => Date.now()
@@ -35,9 +35,9 @@ export const upsertCharacter = internalMutation({
     }
 
     if (existing) {
-      const mergedTags    = [...new Set([...existing.diversityTags, ...args.diversityTags])]
-      const mergedSources = [...new Set([...existing.sources, ...args.sources])]
-      const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(args.aliases ?? [])])]
+      const mergedTags    = Array.from(new Set(existing.diversityTags.concat(args.diversityTags)))
+      const mergedSources = Array.from(new Set(existing.sources.concat(args.sources)))
+      const mergedAliases = Array.from(new Set((existing.aliases ?? []).concat(args.aliases ?? [])))
       await ctx.db.patch(existing._id, {
         updatedAt:    ts,
         diversityTags: mergedTags,
@@ -107,10 +107,10 @@ export const upsertCreator = internalMutation({
     }
 
     if (existing) {
-      const mergedTags    = [...new Set([...existing.diversityTags, ...args.diversityTags])]
-      const mergedSources = [...new Set([...existing.sources, ...args.sources])]
-      const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(args.aliases ?? [])])]
-      const mergedRoles   = [...new Set([...existing.roles, ...args.roles])]
+      const mergedTags    = Array.from(new Set(existing.diversityTags.concat(args.diversityTags)))
+      const mergedSources = Array.from(new Set(existing.sources.concat(args.sources)))
+      const mergedAliases = Array.from(new Set((existing.aliases ?? []).concat(args.aliases ?? [])))
+      const mergedRoles   = Array.from(new Set(existing.roles.concat(args.roles)))
       await ctx.db.patch(existing._id, {
         updatedAt:    ts,
         diversityTags: mergedTags,
@@ -198,6 +198,17 @@ export const getCatalogStats = query({
 
 // ── Batch helpers (used by ingestion action) ──────────────────────────────────
 
+export const getUnenrichedCreators = internalQuery({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, { limit }) => {
+    const rows = await ctx.db
+      .query('catalogCreators')
+      .withIndex('by_enriched', q => q.eq('cvEnrichedAt', undefined))
+      .take(limit ?? 50)
+    return rows
+  },
+})
+
 export const getUnenrichedCharacters = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
@@ -230,4 +241,152 @@ export const exportCreators = query({
     const rows = await ctx.db.query('catalogCreators').collect()
     return rows.map(({ _id, _creationTime, ...rest }) => rest)
   },
+})
+
+// ── Queries de detalle (por _id) ──────────────────────────────────────────────
+
+export const getCharacterById = query({
+  args: { id: v.id('catalogCharacters') },
+  handler: async (ctx, { id }) => ctx.db.get(id),
+})
+
+export const getCreatorById = query({
+  args: { id: v.id('catalogCreators') },
+  handler: async (ctx, { id }) => ctx.db.get(id),
+})
+
+export const searchCreators = query({
+  args: {
+    diversityTags: v.optional(v.array(v.string())),
+    enrichedOnly:  v.optional(v.boolean()),
+    limit:         v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    let rows = await ctx.db.query('catalogCreators').order('asc').collect()
+    if (args.diversityTags?.length) {
+      rows = rows.filter(r => args.diversityTags!.some(t => r.diversityTags.includes(t)))
+    }
+    if (args.enrichedOnly) {
+      rows = rows.filter(r => r.cvEnrichedAt != null)
+    }
+    return rows.slice(0, args.limit ?? 500)
+  },
+})
+
+// ── CRUD público — Characters ─────────────────────────────────────────────────
+
+export const createCharacter = mutation({
+  args: {
+    name:            v.string(),
+    aliases:         v.optional(v.array(v.string())),
+    diversityTags:   v.array(v.string()),
+    cvId:            v.optional(v.number()),
+    cvUrl:           v.optional(v.string()),
+    deck:            v.optional(v.string()),
+    realName:        v.optional(v.string()),
+    publisher:       v.optional(v.string()),
+    powers:          v.optional(v.array(v.string())),
+    firstAppearance: v.optional(v.string()),
+    coverUrl:        v.optional(v.string()),
+    wikiUrl:         v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('catalogCharacters')
+      .withIndex('by_name', q => q.eq('name', args.name))
+      .first()
+    if (existing) throw new Error(`"${args.name}" ya existe en el catálogo`)
+    const ts = now()
+    return ctx.db.insert('catalogCharacters', {
+      ...args,
+      aliases:       args.aliases ?? [],
+      sources:       ['manual'],
+      createdAt:     ts,
+      updatedAt:     ts,
+    })
+  },
+})
+
+export const editCharacter = mutation({
+  args: {
+    id:              v.id('catalogCharacters'),
+    name:            v.optional(v.string()),
+    aliases:         v.optional(v.array(v.string())),
+    diversityTags:   v.optional(v.array(v.string())),
+    cvId:            v.optional(v.number()),
+    cvUrl:           v.optional(v.string()),
+    deck:            v.optional(v.string()),
+    realName:        v.optional(v.string()),
+    publisher:       v.optional(v.string()),
+    powers:          v.optional(v.array(v.string())),
+    firstAppearance: v.optional(v.string()),
+    coverUrl:        v.optional(v.string()),
+    wikiUrl:         v.optional(v.string()),
+  },
+  handler: async (ctx, { id, ...fields }) => {
+    await ctx.db.patch(id, { ...fields, updatedAt: now() })
+  },
+})
+
+export const deleteCharacter = mutation({
+  args: { id: v.id('catalogCharacters') },
+  handler: async (ctx, { id }) => ctx.db.delete(id),
+})
+
+// ── CRUD público — Creators ───────────────────────────────────────────────────
+
+export const createCreator = mutation({
+  args: {
+    name:             v.string(),
+    aliases:          v.optional(v.array(v.string())),
+    roles:            v.array(v.string()),
+    diversityTags:    v.array(v.string()),
+    cvId:             v.optional(v.number()),
+    cvUrl:            v.optional(v.string()),
+    deck:             v.optional(v.string()),
+    nationality:      v.optional(v.string()),
+    birthYear:        v.optional(v.number()),
+    coverUrl:         v.optional(v.string()),
+    wikiUrl:          v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('catalogCreators')
+      .withIndex('by_name', q => q.eq('name', args.name))
+      .first()
+    if (existing) throw new Error(`"${args.name}" ya existe en el catálogo`)
+    const ts = now()
+    return ctx.db.insert('catalogCreators', {
+      ...args,
+      aliases:  args.aliases ?? [],
+      sources:  ['manual'],
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  },
+})
+
+export const editCreator = mutation({
+  args: {
+    id:           v.id('catalogCreators'),
+    name:         v.optional(v.string()),
+    aliases:      v.optional(v.array(v.string())),
+    roles:        v.optional(v.array(v.string())),
+    diversityTags:v.optional(v.array(v.string())),
+    cvId:         v.optional(v.number()),
+    cvUrl:        v.optional(v.string()),
+    deck:         v.optional(v.string()),
+    nationality:  v.optional(v.string()),
+    birthYear:    v.optional(v.number()),
+    coverUrl:     v.optional(v.string()),
+    wikiUrl:      v.optional(v.string()),
+  },
+  handler: async (ctx, { id, ...fields }) => {
+    await ctx.db.patch(id, { ...fields, updatedAt: now() })
+  },
+})
+
+export const deleteCreator = mutation({
+  args: { id: v.id('catalogCreators') },
+  handler: async (ctx, { id }) => ctx.db.delete(id),
 })

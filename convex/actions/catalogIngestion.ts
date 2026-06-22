@@ -5,7 +5,7 @@ import { internal } from '../_generated/api'
 import { v } from 'convex/values'
 import type { GenericActionCtx } from 'convex/server'
 import type { DataModel } from '../_generated/dataModel'
-import { searchComicVine, getCharacter } from '../../lib/integrations/comicvine'
+import { searchComicVine, getCharacter, getPerson } from '../../lib/integrations/comicvine'
 
 // ── Source scrapers (reuse logic from comicsResearch) ─────────────────────────
 
@@ -103,7 +103,7 @@ async function _doIngest(ctx: ActionCtx, diversityTags: string[]): Promise<{ tot
       if (clean.length < 3 || clean.length > 60) continue
       if (isNoise(clean)) continue
       if (raw.startsWith('List of') || raw.includes(':')) continue
-      if (!tagMap.has(clean)) tagMap.set(clean, new Set())
+      if (!tagMap.has(clean)) tagMap.set(clean, new Set<string>())
       tagMap.get(clean)!.add(tag)
     }
   }
@@ -128,7 +128,8 @@ async function _doIngest(ctx: ActionCtx, diversityTags: string[]): Promise<{ tot
 
   console.log(`[catalog:ingest] ${tagMap.size} unique characters to upsert`)
   let upserted = 0
-  for (const [name, tagSet] of tagMap.entries()) {
+  for (const entry of Array.from(tagMap.entries())) {
+    const [name, tagSet] = entry
     await ctx.runMutation(internal.catalog.upsertCharacter, {
       name,
       aliases:       [],
@@ -206,6 +207,154 @@ async function _doEnrich(
   return { enriched, notFound, total: unenriched.length }
 }
 
+// ── Creator ingestion helpers ─────────────────────────────────────────────────
+
+// Curated seed list of well-known diverse comics creators
+// CV will enrich with: deck, nationality, birthYear, coverUrl, notableWorkCvIds
+type CreatorSeed = { roles: string[]; tags: string[] }
+const CURATED_CREATORS: Record<string, CreatorSeed> = {
+  // Black creators
+  'Christopher Priest':        { roles: ['writer'],          tags: ['black'] },
+  'Dwayne McDuffie':           { roles: ['writer'],          tags: ['black'] },
+  'Reginald Hudlin':           { roles: ['writer'],          tags: ['black'] },
+  'David F. Walker':           { roles: ['writer'],          tags: ['black'] },
+  'Geoffrey Thorne':           { roles: ['writer'],          tags: ['black'] },
+  'Vita Ayala':                { roles: ['writer'],          tags: ['black'] },
+  'DG Chichester':             { roles: ['writer'],          tags: ['black'] },
+  'Eric Wallace':              { roles: ['writer'],          tags: ['black'] },
+  'Denys Cowan':               { roles: ['artist'],          tags: ['black'] },
+  'John Jennings':             { roles: ['artist'],          tags: ['black'] },
+  'Kyle Baker':                { roles: ['writer', 'artist'],tags: ['black'] },
+  'Afua Richardson':           { roles: ['artist'],          tags: ['black'] },
+  'Sanford Greene':            { roles: ['artist'],          tags: ['black'] },
+  'Khary Randolph':            { roles: ['artist'],          tags: ['black'] },
+  'Tanya Ford':                { roles: ['writer'],          tags: ['black'] },
+  'Eve Ewing':                 { roles: ['writer'],          tags: ['black'] },
+  'Pornsak Pichetshote':       { roles: ['writer'],          tags: ['black'] },
+  'Brandon Easton':            { roles: ['writer'],          tags: ['black'] },
+  'Yomi Ayeni':                { roles: ['writer'],          tags: ['black'] },
+  'Anthony Piper':             { roles: ['writer', 'artist'],tags: ['black'] },
+  'Ron Wilson':                { roles: ['artist'],          tags: ['black'] },
+  'Arvell Jones':              { roles: ['artist'],          tags: ['black'] },
+  'Wayne Faucher':             { roles: ['artist'],          tags: ['black'] },
+  'Jamal Igle':                { roles: ['artist'],          tags: ['black'] },
+  'Ernie Colón':               { roles: ['artist'],          tags: ['black'] },
+  'Marc Sumerak':              { roles: ['writer'],          tags: ['black'] },
+  // Latino creators
+  'George Pérez':              { roles: ['artist'],          tags: ['latino'] },
+  'Joe Quesada':               { roles: ['artist', 'writer'],tags: ['latino'] },
+  'Jimmy Palmiotti':           { roles: ['writer'],          tags: ['latino'] },
+  'Humberto Ramos':            { roles: ['artist'],          tags: ['latino'] },
+  'Olivier Coipel':            { roles: ['artist'],          tags: ['latino'] },
+  'Carlos Pacheco':            { roles: ['artist'],          tags: ['latino'] },
+  'Francis Manapul':           { roles: ['artist', 'writer'],tags: ['latino'] },
+  'Fernando Pasarín':          { roles: ['artist'],          tags: ['latino'] },
+  'Leinil Francis Yu':         { roles: ['artist'],          tags: ['latino'] },
+  'Jesús Merino':              { roles: ['artist'],          tags: ['latino'] },
+  'Javier Rodríguez':          { roles: ['artist', 'colorist'], tags: ['latino'] },
+  'Rafael Albuquerque':        { roles: ['artist'],          tags: ['latino'] },
+  'Eduardo Risso':             { roles: ['artist'],          tags: ['latino'] },
+  'Alvaro Martínez Bueno':     { roles: ['artist'],          tags: ['latino'] },
+  'G. Willow Wilson':          { roles: ['writer'],          tags: ['arab'] },
+  // Asian creators
+  'Jim Lee':                   { roles: ['artist'],          tags: ['asian'] },
+  'Jeff Yang':                 { roles: ['writer'],          tags: ['asian'] },
+  'Gene Luen Yang':            { roles: ['writer', 'artist'],tags: ['asian'] },
+  'Derek Kirk Kim':            { roles: ['writer', 'artist'],tags: ['asian'] },
+  'Dustin Nguyen':             { roles: ['artist'],          tags: ['asian'] },
+  'Bernard Chang':             { roles: ['artist'],          tags: ['asian'] },
+  'Phil Jimenez':              { roles: ['artist'],          tags: ['asian'] },
+  'Kevin Wada':                { roles: ['artist'],          tags: ['asian'] },
+  'Gail Simone':               { roles: ['writer'],          tags: ['asian'] },
+  'Takeshi Miyazawa':          { roles: ['artist'],          tags: ['asian'] },
+  'Whilce Portacio':           { roles: ['artist'],          tags: ['asian'] },
+  'Jeph Loeb':                 { roles: ['writer'],          tags: ['asian'] },
+  // Indigenous creators
+  'Lee Francis IV':            { roles: ['writer'],          tags: ['indigenous'] },
+  'Arigon Starr':              { roles: ['writer', 'artist'],tags: ['indigenous'] },
+  'Theo Tso':                  { roles: ['writer', 'artist'],tags: ['indigenous'] },
+}
+
+async function _doIngestCreators(ctx: ActionCtx, diversityTags: string[]): Promise<{ total: number }> {
+  const tagSet = new Set(diversityTags)
+  let upserted = 0
+
+  for (const [name, seed] of Object.entries(CURATED_CREATORS)) {
+    const matchedTags = seed.tags.filter(t => tagSet.size === 0 || tagSet.has(t))
+    if (matchedTags.length === 0) continue
+    await ctx.runMutation(internal.catalog.upsertCreator, {
+      name,
+      roles:         seed.roles,
+      diversityTags: matchedTags,
+      sources:       ['curated'],
+    })
+    upserted++
+  }
+
+  console.log(`[catalog:creators:ingest] ${upserted} creators upserted from curated list`)
+  return { total: upserted }
+}
+
+async function _doEnrichCreators(
+  ctx: ActionCtx,
+  limit: number,
+  batchSize: number,
+  delayMs: number,
+): Promise<{ enriched: number; notFound: number; total: number }> {
+  const unenriched: Array<{ _id: string; name: string; diversityTags: string[]; roles: string[] }> =
+    await ctx.runQuery(internal.catalog.getUnenrichedCreators, { limit })
+
+  console.log(`[catalog:creators:enrich] ${unenriched.length} creators to enrich from CV`)
+  let enriched = 0, notFound = 0
+
+  for (let i = 0; i < unenriched.length; i += batchSize) {
+    const batch = unenriched.slice(i, i + batchSize)
+    await Promise.all(batch.map(async creator => {
+      try {
+        const hits = await searchComicVine(creator.name, ['person'], 5)
+        const nl   = creator.name.toLowerCase()
+        const best = hits.find(h => h.name?.toLowerCase() === nl)
+          ?? hits.find(h => (h.name?.toLowerCase() ?? '').startsWith(nl))
+        if (!best) {
+          await ctx.runMutation(internal.catalog.upsertCreator, {
+            name:          creator.name,
+            roles:         creator.roles,
+            diversityTags: creator.diversityTags,
+            sources:       [],
+            cvEnrichedAt:  Date.now(),
+          })
+          notFound++
+          return
+        }
+        const detail = await getPerson(best.id)
+        const birthYear = detail.birth ? new Date(detail.birth).getFullYear() : undefined
+        await ctx.runMutation(internal.catalog.upsertCreator, {
+          name:          creator.name,
+          roles:         creator.roles,
+          diversityTags: creator.diversityTags,
+          cvId:          best.id,
+          cvUrl:         best.site_detail_url            || undefined,
+          deck:          detail.deck                     || undefined,
+          nationality:   detail.country                  || undefined,
+          birthYear:     isNaN(birthYear!) ? undefined : birthYear,
+          coverUrl:      detail.image?.medium_url        || undefined,
+          sources:       ['comicvine'],
+          cvEnrichedAt:  Date.now(),
+        })
+        enriched++
+        console.log(`[catalog:creators:enrich] "${creator.name}" → CV id=${best.id}`)
+      } catch (e) {
+        console.log(`[catalog:creators:enrich] error "${creator.name}": ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }))
+    if (i + batchSize < unenriched.length) {
+      await new Promise(r => setTimeout(r, delayMs))
+    }
+  }
+  console.log(`[catalog:creators:enrich] done: ${enriched} enriched, ${notFound} not found`)
+  return { enriched, notFound, total: unenriched.length }
+}
+
 // ── Action: ingest names from Wikipedia + worldofblackheroes → catalog ────────
 
 export const ingestNamesFromSources = action({
@@ -223,6 +372,23 @@ export const enrichCharactersFromCV = action({
   },
   handler: async (ctx, args) =>
     _doEnrich(ctx, args.limit ?? 30, args.batchSize ?? 3, args.delayMs ?? 600),
+})
+
+// ── Actions: creator pipeline ─────────────────────────────────────────────────
+
+export const ingestCreatorsFromSources = action({
+  args: { diversityTags: v.array(v.string()) },
+  handler: async (ctx, args) => _doIngestCreators(ctx, args.diversityTags),
+})
+
+export const enrichCreatorsFromCV = action({
+  args: {
+    limit:     v.optional(v.number()),
+    batchSize: v.optional(v.number()),
+    delayMs:   v.optional(v.number()),
+  },
+  handler: async (ctx, args) =>
+    _doEnrichCreators(ctx, args.limit ?? 30, args.batchSize ?? 3, args.delayMs ?? 600),
 })
 
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────

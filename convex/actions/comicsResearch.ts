@@ -178,8 +178,7 @@ export const searchByDiverseCharacters = action({
     } else {
       // Scraping path: catalog insufficient — fetch from Wikipedia + worldofblackheroes.com
       console.log(`[charSearch] catalog insufficient (${catalogChars.length}), scraping sources`)
-
-      async function collectCharactersForTag(tag: string) {
+      const collectCharactersForTag = async (tag: string) => {
         if (tag === 'black') {
           const names = await fetchWorldOfBlackHeroes()
           console.log(`[src:black] worldofblackheroes.com → ${names.length} heroes`)
