@@ -3,6 +3,7 @@ import { useState, useMemo } from 'react'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
+import Pagination from '@/components/dashboard/Pagination'
 
 const TAG_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   black:      { bg: '#1e293b', text: '#94a3b8', dot: '#94a3b8' },
@@ -307,6 +308,10 @@ export default function CreatorsPage() {
   const [search,      setSearch]      = useState('')
   const [showForm,    setShowForm]    = useState(false)
   const [editTarget,  setEditTarget]  = useState<CreatorDoc | null>(null)
+  const [page,        setPage]        = useState(1)
+  const [pageSize,    setPageSize]    = useState(50)
+
+  function resetPage() { setPage(1) }
 
   const createCreator = useMutation(api.catalog.createCreator)
   const editCreator   = useMutation(api.catalog.editCreator)
@@ -332,6 +337,11 @@ export default function CreatorsPage() {
     }
     return rows
   }, [creators, activeRole, search])
+
+  const paginated = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, page, pageSize])
 
   async function handleCreate(data: Omit<CreatorDoc, '_id' | 'sources' | 'createdAt' | 'updatedAt'>) {
     await createCreator({
@@ -414,7 +424,7 @@ export default function CreatorsPage() {
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <input type="text" placeholder="Buscar…" value={search} onChange={e => setSearch(e.target.value)}
+            <input type="text" placeholder="Buscar…" value={search} onChange={e => { setSearch(e.target.value); resetPage() }}
               className="w-full pl-9 pr-4 py-2 text-sm rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
               style={{ background: '#fff', border: '1px solid #e2e8f0', color: '#1e293b' }} />
           </div>
@@ -422,7 +432,7 @@ export default function CreatorsPage() {
           {/* Tag filter */}
           <div className="flex gap-1.5">
             {['', ...ALL_TAGS].map(tag => (
-              <button key={tag || 'all'} onClick={() => setActiveTag(tag)}
+              <button key={tag || 'all'} onClick={() => { setActiveTag(tag); resetPage() }}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
                 style={activeTag === tag
                   ? { background: '#6366f1', color: '#fff' }
@@ -437,7 +447,7 @@ export default function CreatorsPage() {
           {/* Role filter */}
           <select
             value={activeRole}
-            onChange={e => setActiveRole(e.target.value)}
+            onChange={e => { setActiveRole(e.target.value); resetPage() }}
             className="px-3 py-1.5 rounded-lg text-xs font-medium outline-none"
             style={{ background: '#fff', border: '1px solid #e2e8f0', color: '#64748b' }}
           >
@@ -446,7 +456,7 @@ export default function CreatorsPage() {
           </select>
 
           {creators && (
-            <span className="text-xs text-slate-400 ml-auto">{filtered.length} creadores</span>
+            <span className="text-xs text-slate-400 ml-auto">{filtered.length.toLocaleString()} creadores</span>
           )}
         </div>
       </div>
@@ -458,16 +468,25 @@ export default function CreatorsPage() {
           : filtered.length === 0
             ? <div className="text-center py-20 text-slate-400 text-sm">Sin resultados</div>
             : (
-              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-                {filtered.map(c => (
-                  <CreatorCard
-                    key={c._id}
-                    creator={c}
-                    onEdit={() => { setEditTarget(c); setShowForm(true) }}
-                    onDelete={() => handleDelete(c._id)}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+                  {paginated.map(c => (
+                    <CreatorCard
+                      key={c._id}
+                      creator={c}
+                      onEdit={() => { setEditTarget(c); setShowForm(true) }}
+                      onDelete={() => handleDelete(c._id)}
+                    />
+                  ))}
+                </div>
+                <Pagination
+                  total={filtered.length}
+                  page={page}
+                  pageSize={pageSize}
+                  onPage={setPage}
+                  onPageSize={s => { setPageSize(s); setPage(1) }}
+                />
+              </>
             )
         }
       </div>
