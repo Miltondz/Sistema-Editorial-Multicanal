@@ -841,6 +841,52 @@ export const fixResearchedSuspiciousTags = action({
   },
 })
 
+// ── Action: add Jo Mullein GL entries + fix GL base entry ────────────────────
+
+export const addJoMulleinGreenLanterns = action({
+  args: {},
+  handler: async (ctx): Promise<{ cleared: number; added: number }> => {
+    // Clear Hal Jordan base entry — not diverse
+    await ctx.runMutation(internal.catalog.patchCharacterTags, { name: 'Green Lantern', diversityTags: [] })
+
+    const entries = [
+      {
+        name:           'Jo Mullein',
+        realName:       'Sojourner "Jo" Mullein',
+        mantleId:       'Green Lantern',
+        versionType:    'legacy' as const,
+        universe:       'Prime Earth',
+        publisher:      'DC Comics',
+        diversityTags:  ['black', 'woman'],
+        firstAppearance:'Far Sector #1 (2019)',
+        deck:           'Sojourner "Jo" Mullein is a former New York City police officer chosen by the Green Lantern Corps to protect Sector 2814.0 — a distant artificial world of 20 billion inhabitants. Created by N.K. Jemisin and Jamal Campbell.',
+        aliases:        ['Green Lantern (Jo Mullein)', 'Far Sector Green Lantern'],
+        sources:        ['manual'],
+      },
+      {
+        name:           'Jo Mullein (Absolute)',
+        realName:       'Sojourner "Jo" Mullein',
+        mantleId:       'Green Lantern',
+        versionType:    'alternate_universe' as const,
+        universe:       'Absolute Universe',
+        publisher:      'DC Comics',
+        diversityTags:  ['black', 'woman'],
+        firstAppearance:'Absolute Green Lantern #1 (June 2025)',
+        deck:           'Sojourner "Jo" Mullein is a former Evergreen City police officer granted power over the "Green Level of Light" by the alien Abin Sur. DC Absolute Universe reimagining created by N.K. Jemisin and Jamal Campbell.',
+        aliases:        ['Absolute Green Lantern', 'Tomar Jo'],
+        sources:        ['manual'],
+      },
+    ]
+
+    for (const entry of entries) {
+      await ctx.runMutation(internal.catalog.upsertCharacter, entry)
+    }
+
+    console.log(`[gl:fix] cleared=1 added=${entries.length}`)
+    return { cleared: 1, added: entries.length }
+  },
+})
+
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────
 
 export const runFullIngestion = action({
