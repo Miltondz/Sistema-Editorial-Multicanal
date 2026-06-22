@@ -686,6 +686,61 @@ export const seedMantleData = action({
   },
 })
 
+// ── Action: fix incorrect Batman diversity tags + add researched diverse versions ──
+
+export const fixDiverseBatmanData = action({
+  args: {},
+  handler: async (ctx): Promise<{ cleared: number; added: number }> => {
+    // 1. Remove incorrect tags — these are Bruce Wayne / Terry McGinnis (not diverse)
+    const clears = [
+      { name: 'Batman',       diversityTags: [] as string[] },
+      { name: 'Batman Beyond', diversityTags: [] as string[] },
+    ]
+    let cleared = 0
+    for (const c of clears) {
+      const ok: boolean = await ctx.runMutation(internal.catalog.patchCharacterTags, c)
+      if (ok) cleared++
+    }
+
+    // 2. Add correctly researched diverse Batman versions
+    const newBatmen = [
+      {
+        name:           'Wayne Williams',
+        realName:       'Wayne Williams',
+        mantleId:       'Batman',
+        versionType:    'alternate_universe',
+        universe:       'Just Imagine / Earth-6',
+        publisher:      'DC Comics',
+        diversityTags:  ['black'],
+        firstAppearance:'Just Imagine Stan Lee\'s Batman #1 (2001)',
+        deck:           'Wayne Williams, a Black man wrongly imprisoned for the murder of his father, gains superhuman strength and becomes Batman in Stan Lee\'s 2001 reimagining of the DC Universe. Created by Stan Lee and Joe Kubert.',
+        aliases:        ['Batman (Wayne Williams)', 'Just Imagine Batman'],
+        sources:        ['manual'],
+      },
+      {
+        name:           'Wang Baixi',
+        realName:       'Wang Baixi',
+        mantleId:       'Batman',
+        versionType:    'legacy',
+        universe:       'Prime Earth',
+        publisher:      'DC Comics',
+        diversityTags:  ['asian'],
+        firstAppearance:'New Super-Man #1 (2016)',
+        deck:           'Wang Baixi is the Bat-Man of China, a martial artist and member of the Justice League of China. Created by Gene Luen Yang, he protects Shanghai using kung fu and Chinese-adapted bat technology.',
+        aliases:        ['Bat-Man of China', 'Bat-Man', 'Batman of China'],
+        sources:        ['manual'],
+      },
+    ]
+
+    for (const char of newBatmen) {
+      await ctx.runMutation(internal.catalog.upsertCharacter, char)
+    }
+
+    console.log(`[batman:fix] cleared=${cleared} added=${newBatmen.length}`)
+    return { cleared, added: newBatmen.length }
+  },
+})
+
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────
 
 export const runFullIngestion = action({

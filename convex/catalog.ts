@@ -299,6 +299,19 @@ export const getCharactersByMantle = query({
   },
 })
 
+export const patchCharacterTags = internalMutation({
+  args: { name: v.string(), diversityTags: v.array(v.string()) },
+  handler: async (ctx, args): Promise<boolean> => {
+    const existing = await ctx.db
+      .query('catalogCharacters')
+      .withIndex('by_name', q => q.eq('name', args.name))
+      .first()
+    if (!existing) return false
+    await ctx.db.patch(existing._id, { diversityTags: args.diversityTags, updatedAt: now() })
+    return true
+  },
+})
+
 export const patchCharacterMantle = internalMutation({
   args: {
     name:        v.string(),
