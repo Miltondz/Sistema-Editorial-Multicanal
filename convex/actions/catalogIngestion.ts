@@ -96,53 +96,51 @@ export const ingestNamesFromSources = action({
   handler: async (ctx, args) => {
     const tagMap = new Map<string, Set<string>>()  // name → Set<tag>
 
-    for (const tag of args.diversityTags) {
-      const addNames = (names: string[], src: string) => {
-        for (const raw of names) {
-          const clean = cleanName(raw)
-          if (clean.length < 3 || clean.length > 60) continue
-          if (isNoise(clean)) continue
-          if (raw.startsWith('List of') || raw.includes(':')) continue
-          if (!tagMap.has(clean)) tagMap.set(clean, new Set())
-          tagMap.get(clean)!.add(tag)
-        }
+    const addNames = (names: string[], tag: string) => {
+      for (const raw of names) {
+        const clean = cleanName(raw)
+        if (clean.length < 3 || clean.length > 60) continue
+        if (isNoise(clean)) continue
+        if (raw.startsWith('List of') || raw.includes(':')) continue
+        if (!tagMap.has(clean)) tagMap.set(clean, new Set())
+        tagMap.get(clean)!.add(tag)
       }
+    }
 
+    for (const tag of args.diversityTags) {
       if (tag === 'black') {
         const heroes = await fetchWorldOfBlackHeroes()
         console.log(`[catalog:ingest] worldofblackheroes → ${heroes.length} names`)
-        addNames(heroes, 'worldofblackheroes')
+        addNames(heroes, tag)
       }
 
       for (const page of WIKI_LIST_PAGES[tag] ?? []) {
         const titles = await fetchWikiListPage(page)
         console.log(`[catalog:ingest] wiki:${page} → ${titles.length} links`)
-        addNames(titles, 'wikipedia')
+        addNames(titles, tag)
       }
 
       for (const cat of WIKI_CATEGORY_FALLBACK[tag] ?? []) {
         const titles = await fetchWikiCategory(cat)
         console.log(`[catalog:ingest] wiki-cat:${cat} → ${titles.length} members`)
-        addNames(titles, 'wikipedia')
+        addNames(titles, tag)
       }
     }
 
     console.log(`[catalog:ingest] ${tagMap.size} unique characters to upsert`)
 
-    // Batch upsert into catalogCharacters (no CV enrichment yet)
-    let inserted = 0, updated = 0
+    let upserted = 0
     for (const [name, tagSet] of tagMap.entries()) {
-      const result = await ctx.runMutation(internal.catalog.upsertCharacter, {
+      await ctx.runMutation(internal.catalog.upsertCharacter, {
         name,
         aliases:       [],
         diversityTags: Array.from(tagSet),
         sources:       ['wikipedia'],
       })
-      if (result) inserted++  // simplified — upsert returns _id either way
-      updated++
+      upserted++
     }
 
-    console.log(`[catalog:ingest] done: ${updated} upserted (${tagMap.size} unique names)`)
+    console.log(`[catalog:ingest] done: ${upserted} upserted`)
     return { total: tagMap.size }
   },
 })

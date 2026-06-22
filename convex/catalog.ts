@@ -1,4 +1,4 @@
-import { query, internalMutation } from './_generated/server'
+import { query, internalQuery, internalMutation } from './_generated/server'
 import { v } from 'convex/values'
 
 const now = () => Date.now()
@@ -35,29 +35,25 @@ export const upsertCharacter = internalMutation({
     }
 
     if (existing) {
-      // Merge: only overwrite fields that are actually provided (don't blank existing data)
-      const patch: Record<string, unknown> = { updatedAt: ts }
-      if (args.cvId        != null) patch.cvId           = args.cvId
-      if (args.cvUrl)               patch.cvUrl          = args.cvUrl
-      if (args.deck)                patch.deck           = args.deck
-      if (args.realName)            patch.realName       = args.realName
-      if (args.publisher)           patch.publisher      = args.publisher
-      if (args.powers?.length)      patch.powers         = args.powers
-      if (args.firstAppearance)     patch.firstAppearance= args.firstAppearance
-      if (args.coverUrl)            patch.coverUrl       = args.coverUrl
-      if (args.wikiUrl)             patch.wikiUrl        = args.wikiUrl
-      if (args.cvEnrichedAt != null)patch.cvEnrichedAt   = args.cvEnrichedAt
-      // Merge diversity tags (union)
-      const mergedTags = [...new Set([...existing.diversityTags, ...args.diversityTags])]
-      patch.diversityTags = mergedTags
-      // Merge sources (union)
+      const mergedTags    = [...new Set([...existing.diversityTags, ...args.diversityTags])]
       const mergedSources = [...new Set([...existing.sources, ...args.sources])]
-      patch.sources = mergedSources
-      // Merge aliases
       const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(args.aliases ?? [])])]
-      patch.aliases = mergedAliases
-
-      await ctx.db.patch(existing._id, patch)
+      await ctx.db.patch(existing._id, {
+        updatedAt:    ts,
+        diversityTags: mergedTags,
+        sources:       mergedSources,
+        aliases:       mergedAliases,
+        ...(args.cvId         != null ? { cvId:            args.cvId }            : {}),
+        ...(args.cvUrl               ? { cvUrl:            args.cvUrl }            : {}),
+        ...(args.deck                ? { deck:             args.deck }             : {}),
+        ...(args.realName            ? { realName:         args.realName }         : {}),
+        ...(args.publisher           ? { publisher:        args.publisher }        : {}),
+        ...(args.powers?.length      ? { powers:           args.powers }           : {}),
+        ...(args.firstAppearance     ? { firstAppearance:  args.firstAppearance }  : {}),
+        ...(args.coverUrl            ? { coverUrl:         args.coverUrl }         : {}),
+        ...(args.wikiUrl             ? { wikiUrl:          args.wikiUrl }          : {}),
+        ...(args.cvEnrichedAt != null? { cvEnrichedAt:     args.cvEnrichedAt }     : {}),
+      })
       return existing._id
     }
 
@@ -111,21 +107,26 @@ export const upsertCreator = internalMutation({
     }
 
     if (existing) {
-      const patch: Record<string, unknown> = { updatedAt: ts }
-      if (args.cvId         != null) patch.cvId            = args.cvId
-      if (args.cvUrl)                patch.cvUrl           = args.cvUrl
-      if (args.deck)                 patch.deck            = args.deck
-      if (args.nationality)          patch.nationality     = args.nationality
-      if (args.birthYear    != null) patch.birthYear       = args.birthYear
-      if (args.coverUrl)             patch.coverUrl        = args.coverUrl
-      if (args.wikiUrl)              patch.wikiUrl         = args.wikiUrl
-      if (args.cvEnrichedAt != null) patch.cvEnrichedAt    = args.cvEnrichedAt
-      if (args.notableWorkCvIds?.length) patch.notableWorkCvIds = args.notableWorkCvIds
-      patch.diversityTags = [...new Set([...existing.diversityTags, ...args.diversityTags])]
-      patch.sources       = [...new Set([...existing.sources, ...args.sources])]
-      patch.aliases       = [...new Set([...(existing.aliases ?? []), ...(args.aliases ?? [])])]
-      patch.roles         = [...new Set([...existing.roles, ...args.roles])]
-      await ctx.db.patch(existing._id, patch)
+      const mergedTags    = [...new Set([...existing.diversityTags, ...args.diversityTags])]
+      const mergedSources = [...new Set([...existing.sources, ...args.sources])]
+      const mergedAliases = [...new Set([...(existing.aliases ?? []), ...(args.aliases ?? [])])]
+      const mergedRoles   = [...new Set([...existing.roles, ...args.roles])]
+      await ctx.db.patch(existing._id, {
+        updatedAt:    ts,
+        diversityTags: mergedTags,
+        sources:       mergedSources,
+        aliases:       mergedAliases,
+        roles:         mergedRoles,
+        ...(args.cvId              != null ? { cvId:             args.cvId }             : {}),
+        ...(args.cvUrl                     ? { cvUrl:            args.cvUrl }            : {}),
+        ...(args.deck                      ? { deck:             args.deck }             : {}),
+        ...(args.nationality               ? { nationality:      args.nationality }      : {}),
+        ...(args.birthYear         != null ? { birthYear:        args.birthYear }        : {}),
+        ...(args.coverUrl                  ? { coverUrl:         args.coverUrl }         : {}),
+        ...(args.wikiUrl                   ? { wikiUrl:          args.wikiUrl }          : {}),
+        ...(args.cvEnrichedAt      != null ? { cvEnrichedAt:     args.cvEnrichedAt }     : {}),
+        ...(args.notableWorkCvIds?.length  ? { notableWorkCvIds: args.notableWorkCvIds } : {}),
+      })
       return existing._id
     }
 
@@ -197,7 +198,7 @@ export const getCatalogStats = query({
 
 // ── Batch helpers (used by ingestion action) ──────────────────────────────────
 
-export const getUnenrichedCharacters = query({
+export const getUnenrichedCharacters = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
     const rows = await ctx.db
