@@ -910,6 +910,38 @@ export const addRowanKent = action({
   },
 })
 
+// ── Action: add Sam Chung (Blindspot) + fix Flashback (Sara Quinones) ────────
+
+export const addBlindspotAndFixFlashback = action({
+  args: {},
+  handler: async (ctx): Promise<{ updated: number; added: number }> => {
+    // Fix Flashback: was incorrectly tagged 'black'; is actually Sara Quinones, Latina (Puerto Rican), Milestone
+    await ctx.runMutation(internal.catalog.patchCharacterTags, { name: 'Flashback', diversityTags: ['latina'] })
+    await ctx.runMutation(internal.catalog.patchCharacterMantle, {
+      name:        'Flashback',
+      mantleId:    'Flashback',
+      versionType: 'original',
+      universe:    'Dakotaverse',
+    })
+
+    // Add Sam Chung / Blindspot — Asian character in Daredevil's orbit (not Daredevil himself)
+    await ctx.runMutation(internal.catalog.upsertCharacter, {
+      name:           'Sam Chung',
+      realName:       'Sam Chung',
+      publisher:      'Marvel Comics',
+      diversityTags:  ['asian'],
+      firstAppearance:'Daredevil Vol. 5 #6 (2016)',
+      deck:           'Sam Chung is a Chinese-American protégé of Matt Murdock who takes on the identity of Blindspot. Created by Charles Soule, he is one of the few Asian characters to operate in Daredevil\'s street-level corner of Marvel Earth-616.',
+      aliases:        ['Blindspot', 'Blindspot (Sam Chung)'],
+      sources:        ['manual'],
+      universe:       'Earth-616',
+    })
+
+    console.log('[blindspot+flashback] updated=1 added=1')
+    return { updated: 1, added: 1 }
+  },
+})
+
 // ── Action: full pipeline (ingest + enrich) ───────────────────────────────────
 
 export const runFullIngestion = action({
