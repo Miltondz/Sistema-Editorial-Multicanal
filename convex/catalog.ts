@@ -179,7 +179,11 @@ export const searchCharacters = query({
     if (args.enrichedOnly) {
       rows = rows.filter(r => r.cvEnrichedAt != null)
     }
-    return rows.slice(0, args.limit ?? 500)
+    const sliced = rows.slice(0, args.limit ?? 500)
+    return Promise.all(sliced.map(async r => ({
+      ...r,
+      storageImageUrl: r.storageId ? await ctx.storage.getUrl(r.storageId) : null,
+    })))
   },
 })
 
@@ -275,15 +279,24 @@ export const exportCreators = query({
 
 export const getCharacterById = query({
   args: { id: v.id('catalogCharacters') },
-  handler: async (ctx, { id }) => ctx.db.get(id),
+  handler: async (ctx, { id }) => {
+    const r = await ctx.db.get(id)
+    if (!r) return null
+    return { ...r, storageImageUrl: r.storageId ? await ctx.storage.getUrl(r.storageId) : null }
+  },
 })
 
 export const getCharactersByMantle = query({
   args: { mantleId: v.string() },
-  handler: async (ctx, { mantleId }) =>
-    ctx.db.query('catalogCharacters')
+  handler: async (ctx, { mantleId }) => {
+    const rows = await ctx.db.query('catalogCharacters')
       .withIndex('by_mantle', q => q.eq('mantleId', mantleId))
-      .collect(),
+      .collect()
+    return Promise.all(rows.map(async r => ({
+      ...r,
+      storageImageUrl: r.storageId ? await ctx.storage.getUrl(r.storageId) : null,
+    })))
+  },
 })
 
 export const patchCharacterMantle = internalMutation({
@@ -313,7 +326,11 @@ export const patchCharacterMantle = internalMutation({
 
 export const getCreatorById = query({
   args: { id: v.id('catalogCreators') },
-  handler: async (ctx, { id }) => ctx.db.get(id),
+  handler: async (ctx, { id }) => {
+    const r = await ctx.db.get(id)
+    if (!r) return null
+    return { ...r, storageImageUrl: r.storageId ? await ctx.storage.getUrl(r.storageId) : null }
+  },
 })
 
 export const searchCreators = query({
@@ -330,8 +347,43 @@ export const searchCreators = query({
     if (args.enrichedOnly) {
       rows = rows.filter(r => r.cvEnrichedAt != null)
     }
-    return rows.slice(0, args.limit ?? 500)
+    const sliced = rows.slice(0, args.limit ?? 500)
+    return Promise.all(sliced.map(async r => ({
+      ...r,
+      storageImageUrl: r.storageId ? await ctx.storage.getUrl(r.storageId) : null,
+    })))
   },
+})
+
+// ── Storage helpers ───────────────────────────────────────────────────────────
+
+export const generateUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => ctx.storage.generateUploadUrl(),
+})
+
+export const setCharacterImage = mutation({
+  args: { id: v.id('catalogCharacters'), storageId: v.id('_storage') },
+  handler: async (ctx, { id, storageId }) =>
+    ctx.db.patch(id, { storageId, updatedAt: now() }),
+})
+
+export const clearCharacterImage = mutation({
+  args: { id: v.id('catalogCharacters') },
+  handler: async (ctx, { id }) =>
+    ctx.db.patch(id, { storageId: undefined, updatedAt: now() }),
+})
+
+export const setCreatorImage = mutation({
+  args: { id: v.id('catalogCreators'), storageId: v.id('_storage') },
+  handler: async (ctx, { id, storageId }) =>
+    ctx.db.patch(id, { storageId, updatedAt: now() }),
+})
+
+export const clearCreatorImage = mutation({
+  args: { id: v.id('catalogCreators') },
+  handler: async (ctx, { id }) =>
+    ctx.db.patch(id, { storageId: undefined, updatedAt: now() }),
 })
 
 // ── CRUD público — Characters ─────────────────────────────────────────────────

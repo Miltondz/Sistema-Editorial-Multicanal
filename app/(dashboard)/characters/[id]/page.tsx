@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
+import ImageUpload from '@/components/dashboard/ImageUpload'
 
 const TAG_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   black:      { bg: '#1e293b', text: '#94a3b8', dot: '#94a3b8' },
@@ -217,8 +218,15 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
     api.catalog.getCharactersByMantle,
     charMantle?.mantleId ? { mantleId: charMantle.mantleId } : 'skip',
   )
-  const editChar   = useMutation(api.catalog.editCharacter)
-  const deleteChar = useMutation(api.catalog.deleteCharacter)
+  const editChar    = useMutation(api.catalog.editCharacter)
+  const deleteChar  = useMutation(api.catalog.deleteCharacter)
+  const setImage    = useMutation(api.catalog.setCharacterImage)
+  const clearImage  = useMutation(api.catalog.clearCharacterImage)
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const charAny = char as any
+  const charImageUrl: string | null | undefined = charAny?.storageImageUrl ?? char?.coverUrl
+  const charHasStorage: boolean = !!charAny?.storageId
 
   async function handleSave(fields: Record<string, unknown>) {
     await editChar({ id: params.id as Id<'catalogCharacters'>, ...fields } as Parameters<typeof editChar>[0])
@@ -307,8 +315,8 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
         <div className="flex-shrink-0 space-y-4" style={{ width: 240 }}>
           {/* Cover */}
           <div className="rounded-2xl overflow-hidden" style={{ height: 320, background: '#0f172a' }}>
-            {char.coverUrl
-              ? <img src={char.coverUrl} alt={char.name}
+            {charImageUrl
+              ? <img src={charImageUrl} alt={char.name}
                   className="w-full h-full object-cover object-top"
                   onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
               : <div className="w-full h-full flex items-center justify-center">
@@ -319,6 +327,14 @@ export default function CharacterDetailPage({ params }: { params: { id: string }
                 </div>
             }
           </div>
+
+          {/* Image upload */}
+          <ImageUpload
+            currentUrl={charImageUrl}
+            hasStorageImage={charHasStorage}
+            onUploaded={sid => setImage({ id: params.id as Id<'catalogCharacters'>, storageId: sid })}
+            onClear={charHasStorage ? () => clearImage({ id: params.id as Id<'catalogCharacters'> }) : undefined}
+          />
 
           {/* Quick meta */}
           <div className="rounded-xl p-4 space-y-3" style={{ background: '#fff', border: '1px solid #e2e8f0' }}>

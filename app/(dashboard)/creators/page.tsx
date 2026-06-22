@@ -4,6 +4,7 @@ import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
 import Pagination from '@/components/dashboard/Pagination'
+import ImageUpload from '@/components/dashboard/ImageUpload'
 
 const TAG_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   black:      { bg: '#1e293b', text: '#94a3b8', dot: '#94a3b8' },
@@ -24,6 +25,7 @@ type CreatorDoc = {
   roles: string[]; diversityTags: string[]
   coverUrl?: string; cvUrl?: string; wikiUrl?: string
   aliases?: string[]; cvId?: number; cvEnrichedAt?: number
+  storageId?: Id<'_storage'>; storageImageUrl?: string | null
   sources: string[]; createdAt: number; updatedAt: number
   notableWorkCvIds?: number[]
 }
@@ -35,6 +37,9 @@ function CreatorForm({ initial, onClose, onSave }: {
   onClose: () => void
   onSave: (data: Omit<CreatorDoc, '_id' | 'sources' | 'createdAt' | 'updatedAt'>) => Promise<void>
 }) {
+  const setImage   = useMutation(api.catalog.setCreatorImage)
+  const clearImage = useMutation(api.catalog.clearCreatorImage)
+
   const [name,        setName]        = useState(initial?.name ?? '')
   const [deck,        setDeck]        = useState(initial?.deck ?? '')
   const [nationality, setNationality] = useState(initial?.nationality ?? '')
@@ -100,6 +105,17 @@ function CreatorForm({ initial, onClose, onSave }: {
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          {/* Image upload — edit mode only */}
+          {initial?._id && (
+            <ImageUpload
+              currentUrl={initial.storageImageUrl ?? initial.coverUrl}
+              hasStorageImage={!!initial.storageId}
+              onUploaded={sid => setImage({ id: initial._id!, storageId: sid })}
+              onClear={initial.storageId ? () => clearImage({ id: initial._id! }) : undefined}
+              label="Foto / imagen"
+            />
+          )}
+
           {/* Tags */}
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-2">Tags de diversidad *</label>
@@ -213,8 +229,9 @@ function CreatorCard({ creator, onEdit, onDelete }: {
       style={{ background: '#0f172a', border: '1px solid #1e293b' }}>
       {/* Photo */}
       <div className="relative flex-shrink-0" style={{ height: 140, background: '#1e293b', overflow: 'hidden' }}>
-        {creator.coverUrl
-          ? <img src={creator.coverUrl} alt={creator.name} className="w-full h-full object-cover object-top"
+        {(creator.storageImageUrl ?? creator.coverUrl)
+          ? <img src={creator.storageImageUrl ?? creator.coverUrl} alt={creator.name}
+              className="w-full h-full object-cover object-top"
               loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
           : <div className="w-full h-full flex items-center justify-center">
               <svg className="w-10 h-10 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -313,9 +330,11 @@ export default function CreatorsPage() {
 
   function resetPage() { setPage(1) }
 
-  const createCreator = useMutation(api.catalog.createCreator)
-  const editCreator   = useMutation(api.catalog.editCreator)
-  const deleteCreator = useMutation(api.catalog.deleteCreator)
+  const createCreator    = useMutation(api.catalog.createCreator)
+  const editCreator      = useMutation(api.catalog.editCreator)
+  const deleteCreator    = useMutation(api.catalog.deleteCreator)
+  const setCreatorImage  = useMutation(api.catalog.setCreatorImage)
+  const clearCreatorImage = useMutation(api.catalog.clearCreatorImage)
 
   const stats    = useQuery(api.catalog.getCatalogStats)
   const creators = useQuery(api.catalog.searchCreators, {

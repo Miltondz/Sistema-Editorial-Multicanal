@@ -5,6 +5,7 @@ import { useQuery, useMutation } from 'convex/react'
 import { api } from '@/convex/_generated/api'
 import type { Id } from '@/convex/_generated/dataModel'
 import Pagination from '@/components/dashboard/Pagination'
+import ImageUpload from '@/components/dashboard/ImageUpload'
 
 const TAG_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
   black:      { bg: '#1e293b', text: '#94a3b8', dot: '#94a3b8' },
@@ -25,6 +26,7 @@ type CharDoc = {
   cvUrl?: string; firstAppearance?: string; aliases?: string[]
   cvId?: number; wikiUrl?: string; cvEnrichedAt?: number
   mantleId?: string; versionType?: string; universe?: string; legacyIndex?: number
+  storageId?: Id<'_storage'>; storageImageUrl?: string | null
   sources: string[]; createdAt: number; updatedAt: number
 }
 
@@ -37,6 +39,9 @@ function CharacterForm({
   onClose: () => void
   onSave: (data: Omit<CharDoc, '_id' | 'sources' | 'createdAt' | 'updatedAt'>) => Promise<void>
 }) {
+  const setImage   = useMutation(api.catalog.setCharacterImage)
+  const clearImage = useMutation(api.catalog.clearCharacterImage)
+
   const [name,            setName]            = useState(initial?.name ?? '')
   const [realName,        setRealName]        = useState(initial?.realName ?? '')
   const [publisher,       setPublisher]       = useState(initial?.publisher ?? '')
@@ -106,6 +111,16 @@ function CharacterForm({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          {/* Image upload — only in edit mode */}
+          {initial?._id && (
+            <ImageUpload
+              currentUrl={initial.storageImageUrl ?? initial.coverUrl}
+              hasStorageImage={!!initial.storageId}
+              onUploaded={sid => setImage({ id: initial._id!, storageId: sid })}
+              onClear={initial.storageId ? () => clearImage({ id: initial._id! }) : undefined}
+            />
+          )}
+
           {/* Tags */}
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-2">Tags de diversidad *</label>
@@ -237,8 +252,8 @@ function CharacterCard({ char, onEdit, onDelete }: {
       {/* Cover area — image links to detail, action buttons float over */}
       <div className="relative flex-shrink-0" style={{ height: 160 }}>
         <Link href={`/characters/${char._id}`} className="block w-full h-full" style={{ background: '#1e293b' }}>
-          {char.coverUrl
-            ? <img src={char.coverUrl} alt={char.name}
+          {(char.storageImageUrl ?? char.coverUrl)
+            ? <img src={char.storageImageUrl ?? char.coverUrl} alt={char.name}
                 className="w-full h-full object-cover object-top transition-transform hover:scale-105"
                 loading="lazy" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
             : <div className="w-full h-full flex items-center justify-center hover:bg-slate-700 transition-colors">
@@ -335,9 +350,11 @@ export default function CharactersPage() {
 
   function resetPage() { setPage(1) }
 
-  const createChar = useMutation(api.catalog.createCharacter)
-  const editChar   = useMutation(api.catalog.editCharacter)
-  const deleteChar = useMutation(api.catalog.deleteCharacter)
+  const createChar       = useMutation(api.catalog.createCharacter)
+  const editChar         = useMutation(api.catalog.editCharacter)
+  const deleteChar       = useMutation(api.catalog.deleteCharacter)
+  const setCharacterImage = useMutation(api.catalog.setCharacterImage)
+  const clearCharImage    = useMutation(api.catalog.clearCharacterImage)
 
   const stats = useQuery(api.catalog.getCatalogStats)
   const chars = useQuery(api.catalog.searchCharacters, {

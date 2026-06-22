@@ -371,6 +371,8 @@ export default defineSchema({
     versionType:     v.optional(v.string()),  // "original"|"legacy"|"alternate_universe"|"future"|"what_if"
     universe:        v.optional(v.string()),  // "Earth-616","Earth-2","Flashpoint","Ultimate","New 52"
     legacyIndex:     v.optional(v.number()),  // succession order for legacy (1=first holder)
+    // Custom image (takes priority over coverUrl)
+    storageId:       v.optional(v.id('_storage')),
     // Provenance
     sources:         v.array(v.string()),     // ['worldofblackheroes','wikipedia','manual']
     // Freshness tracking
@@ -399,6 +401,8 @@ export default defineSchema({
     birthYear:       v.optional(v.number()),
     coverUrl:        v.optional(v.string()),
     wikiUrl:         v.optional(v.string()),
+    // Custom image (takes priority over coverUrl)
+    storageId:       v.optional(v.id('_storage')),
     // Notable works (cvIds of volumes/issues)
     notableWorkCvIds: v.optional(v.array(v.number())),
     // Provenance
