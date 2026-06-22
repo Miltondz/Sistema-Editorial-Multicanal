@@ -111,6 +111,7 @@ export const upsertCreator = internalMutation({
     notableWorkCvIds: v.optional(v.array(v.number())),
     sources:          v.array(v.string()),
     cvEnrichedAt:     v.optional(v.number()),
+    needsReview:      v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const ts = now()
@@ -141,6 +142,7 @@ export const upsertCreator = internalMutation({
         ...(args.wikiUrl                   ? { wikiUrl:          args.wikiUrl }          : {}),
         ...(args.cvEnrichedAt      != null ? { cvEnrichedAt:     args.cvEnrichedAt }     : {}),
         ...(args.notableWorkCvIds?.length  ? { notableWorkCvIds: args.notableWorkCvIds } : {}),
+        ...(args.needsReview       != null ? { needsReview:      args.needsReview }      : {}),
       })
       return existing._id
     }
@@ -160,6 +162,7 @@ export const upsertCreator = internalMutation({
       notableWorkCvIds: args.notableWorkCvIds,
       sources:          args.sources,
       cvEnrichedAt:     args.cvEnrichedAt,
+      needsReview:      args.needsReview,
       createdAt:        ts,
       updatedAt:        ts,
     })

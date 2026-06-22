@@ -513,6 +513,176 @@ export const ingestMuslimHeroes = action({
   },
 })
 
+// ── Black creators ingestion ───────────────────────────────────────────────────
+
+// Wikipedia category API — returns all page titles in a category, paginated
+async function fetchWikipediaCategory(categoryTitle: string): Promise<string[]> {
+  const titles: string[] = []
+  let continueToken: string | undefined
+  const base = 'https://en.wikipedia.org/w/api.php'
+  for (let page = 0; page < 10; page++) {
+    const params = new URLSearchParams({
+      action:  'query',
+      list:    'categorymembers',
+      cmtitle: categoryTitle,
+      cmtype:  'page',
+      cmlimit: '500',
+      format:  'json',
+      ...(continueToken ? { cmcontinue: continueToken } : {}),
+    })
+    const res = await fetch(`${base}?${params}`, {
+      headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)' },
+    })
+    if (!res.ok) break
+    const json = await res.json() as Record<string, unknown>
+    const members = (json.query as Record<string, unknown>)?.categorymembers as Array<{ title: string }> ?? []
+    for (const m of members) titles.push(m.title)
+    const cont = json.continue as Record<string, unknown> | undefined
+    continueToken = cont?.cmcontinue as string | undefined
+    if (!continueToken) break
+    await new Promise(r => setTimeout(r, 400))
+  }
+  return titles
+}
+
+// Wikipedia REST summary — deck + thumbnail + wikiUrl for a single page title
+interface WikiSummary {
+  title: string
+  extract?: string
+  thumbnail?: { source: string }
+  content_urls?: { desktop?: { page?: string } }
+  description?: string
+}
+async function fetchWikipediaSummary(title: string): Promise<WikiSummary | null> {
+  try {
+    const enc = encodeURIComponent(title.replace(/ /g, '_'))
+    const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${enc}`, {
+      headers: { 'User-Agent': 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)' },
+    })
+    if (!res.ok) return null
+    return await res.json() as WikiSummary
+  } catch { return null }
+}
+
+// Detect roles from Wikipedia extract text
+function detectRoles(text: string): string[] {
+  const roles: string[] = []
+  if (/\b(write|writer|author|novelist|screenwriter)/i.test(text)) roles.push('writer')
+  if (/\b(artist|illustrat|pencil|draw|ink)/i.test(text)) roles.push('artist')
+  if (/\b(colorist|colour)/i.test(text)) roles.push('colorist')
+  if (/\b(cover artist|cover illustrat)/i.test(text)) roles.push('cover_artist')
+  if (/\b(letterer)/i.test(text)) roles.push('letterer')
+  if (/\b(editor|editorial)/i.test(text)) roles.push('editor')
+  if (roles.length === 0) roles.push('writer') // default for these lists
+  return roles
+}
+
+export const ingestBlackCreators = action({
+  args: { enrichLimit: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<{ total: number; enriched: number }> => {
+    const UA  = 'SuperheroesInColor-CMS/1.0 (miltond.diaz@gmail.com)'
+    const seen = new Map<string, string>() // name → wikiTitle (for enrichment)
+
+    // 1. Wikipedia category (best source — authoritative, paginated)
+    console.log('[black-creators] fetching Wikipedia category')
+    const wikiTitles = await fetchWikipediaCategory('Category:African-American_comics_writers')
+    console.log(`[black-creators] Wikipedia: ${wikiTitles.length} members`)
+    for (const t of wikiTitles) seen.set(t, t)
+
+    // 2. Image Comics blog
+    console.log('[black-creators] scraping Image Comics blog')
+    try {
+      const res = await fetch('https://imagecomics.com/features/black-creators-we-recommend-you-read', {
+        headers: { 'User-Agent': UA, Accept: 'text/html' },
+      })
+      if (res.ok) {
+        const html = await res.text()
+        // Image Comics blog uses creator name in headings/links with /creator/ paths
+        const re = /href="[^"]*\/creator\/[^"]*"[^>]*>([^<]{2,60})<\/a>/gi
+        let m: RegExpExecArray | null
+        while ((m = re.exec(html)) !== null) {
+          const name = decodeHtmlEntities(m[1].trim())
+          if (name && !seen.has(name)) seen.set(name, name)
+        }
+        // Fallback: headings
+        const re2 = /<(?:h[1-4])[^>]*>([^<]{4,60})<\/h[1-4]>/gi
+        while ((m = re2.exec(html)) !== null) {
+          const name = decodeHtmlEntities(m[1].trim())
+          if (name && name.length < 60 && !seen.has(name) && /\s/.test(name)) seen.set(name, name)
+        }
+        console.log(`[black-creators] Image Comics: now ${seen.size} total`)
+      }
+    } catch (e) { console.error('[black-creators] Image Comics scrape error:', e) }
+    await new Promise(r => setTimeout(r, 500))
+
+    // 3. CBR article
+    console.log('[black-creators] scraping CBR')
+    try {
+      const res = await fetch('https://www.cbr.com/black-comics-writers-must-read/', {
+        headers: { 'User-Agent': UA, Accept: 'text/html' },
+      })
+      if (res.ok) {
+        const html = await res.text()
+        const extra = await scrapeArticleHeroNames('https://www.cbr.com/black-comics-writers-must-read/')
+        for (const name of extra) {
+          if (!seen.has(name)) seen.set(name, name)
+        }
+        // Also look for numbered list headings common in CBR articles
+        const re = />\s*\d+\s+([A-Z][a-zA-Z\-'\.]+(?:\s+[A-Z][a-zA-Z\-'\.]+)+)\s*</g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(html)) !== null) {
+          const name = m[1].trim()
+          if (name.split(' ').length >= 2 && name.length < 50 && !seen.has(name)) seen.set(name, name)
+        }
+        console.log(`[black-creators] CBR: now ${seen.size} total`)
+      }
+    } catch (e) { console.error('[black-creators] CBR scrape error:', e) }
+
+    console.log(`[black-creators] total unique: ${seen.size}`)
+
+    // Upsert stubs first (all names)
+    for (const [name] of seen) {
+      await ctx.runMutation(internal.catalog.upsertCreator, {
+        name,
+        roles:         ['writer'],
+        diversityTags: ['black'],
+        sources:       ['wikipedia'],
+        needsReview:   true,
+      })
+    }
+
+    // Enrich from Wikipedia (summary + thumbnail) up to limit
+    let enriched = 0
+    const limit = args.enrichLimit ?? 120
+    let count   = 0
+    for (const [name, wikiTitle] of seen) {
+      if (count >= limit) break
+      const summary = await fetchWikipediaSummary(wikiTitle)
+      if (!summary) { count++; continue }
+      const deck    = summary.extract ? summary.extract.slice(0, 500) : undefined
+      const cover   = summary.thumbnail?.source
+      const wikiUrl = summary.content_urls?.desktop?.page
+      const roles   = deck ? detectRoles(deck) : ['writer']
+      await ctx.runMutation(internal.catalog.upsertCreator, {
+        name:          summary.title ?? name,
+        roles,
+        diversityTags: ['black'],
+        deck,
+        coverUrl:      cover,
+        wikiUrl,
+        sources:       ['wikipedia'],
+        cvEnrichedAt:  Date.now(),
+        needsReview:   false,
+      })
+      enriched++; count++
+      await new Promise(r => setTimeout(r, 150)) // Wikipedia is generous with rate limits
+    }
+
+    console.log(`[black-creators] done: total=${seen.size} wikiEnriched=${enriched}`)
+    return { total: seen.size, enriched }
+  },
+})
+
 // ── Source scrapers (reuse logic from comicsResearch) ─────────────────────────
 
 async function fetchWorldOfBlackHeroes(): Promise<string[]> {
